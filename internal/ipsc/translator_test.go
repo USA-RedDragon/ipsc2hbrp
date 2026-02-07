@@ -4,6 +4,10 @@ import (
 	"encoding/binary"
 	"testing"
 
+	"github.com/USA-RedDragon/dmrgo/dmr/enums"
+	"github.com/USA-RedDragon/dmrgo/dmr/layer2"
+	"github.com/USA-RedDragon/dmrgo/dmr/layer2/elements"
+	"github.com/USA-RedDragon/dmrgo/dmr/layer2/pdu"
 	hbrp "github.com/USA-RedDragon/ipsc2hbrp/internal/hbrp/proto"
 )
 
@@ -522,5 +526,524 @@ func TestMultipleStreamsConcurrent(t *testing.T) {
 	cc2 := binary.BigEndian.Uint32(result2[0][13:17])
 	if cc1 == cc2 {
 		t.Fatal("expected different call control values for different streams")
+	}
+}
+
+// makeVoiceDMRData builds a 33-byte DMR voice burst (with sync pattern) that
+// round-trips through layer2.Burst Decode/Encode. This allows buildVoiceBurst
+// and buildHBRPVoiceBurst to work on realistic data.
+func makeVoiceDMRData(syncBurst bool) [33]byte {
+	var burst layer2.Burst
+	// Set up minimal voice frames (silence-ish)
+	burst.VoiceData = pdu.Vocoder{}
+	if syncBurst {
+		burst.SyncPattern = enums.MsSourcedVoice
+		burst.VoiceBurst = enums.VoiceBurstA
+		burst.HasEmbeddedSignalling = false
+	} else {
+		burst.SyncPattern = enums.EmbeddedSignallingPattern
+		burst.VoiceBurst = enums.VoiceBurstB
+		burst.HasEmbeddedSignalling = true
+		burst.EmbeddedSignalling = pdu.EmbeddedSignalling{
+			ColorCode:                          0,
+			PreemptionAndPowerControlIndicator: false,
+			LCSS:                               enums.FirstFragmentLC,
+			ParityOK:                           true,
+		}
+	}
+	return burst.Encode()
+}
+
+func TestBuildVoiceBurstA(t *testing.T) {
+	t.Parallel()
+	tr := newTestTranslator(t)
+
+	// Send a header first to establish stream
+	header := makeTestHBRPPacket(true, false, hbrpFrameTypeDataSync, 1)
+	tr.TranslateToIPSC(header)
+
+	// Build a voice sync burst (burst A, index 0)
+	pkt := makeTestHBRPPacket(true, false, hbrpFrameTypeVoiceSync, 0)
+	pkt.StreamID = header.StreamID
+	pkt.DMRData = makeVoiceDMRData(true)
+
+	result := tr.TranslateToIPSC(pkt)
+	if len(result) != 1 {
+		t.Fatalf("expected 1 voice burst packet, got %d", len(result))
+	}
+
+	// Burst A should be 52 bytes
+	if len(result[0]) != 52 {
+		t.Fatalf("expected burst A to be 52 bytes, got %d", len(result[0]))
+	}
+
+	// Check the slot type byte
+	slotByte := result[0][30]
+	if slotByte != ipscBurstSlot1 {
+		t.Fatalf("expected slot1 burst type 0x%02X, got 0x%02X", ipscBurstSlot1, slotByte)
+	}
+
+	// Check length byte
+	if result[0][31] != 0x14 {
+		t.Fatalf("expected length byte 0x14, got 0x%02X", result[0][31])
+	}
+
+	// Unknown field byte
+	if result[0][32] != 0x40 {
+		t.Fatalf("expected unknown field 0x40, got 0x%02X", result[0][32])
+	}
+}
+
+func TestBuildVoiceBurstBCDF(t *testing.T) {
+	t.Parallel()
+	tr := newTestTranslator(t)
+
+	// Send a header to establish stream state
+	header := makeTestHBRPPacket(true, true, hbrpFrameTypeDataSync, 1)
+	tr.TranslateToIPSC(header)
+
+	// Send burst A to advance burstIndex to 1
+	burstA := makeTestHBRPPacket(true, true, hbrpFrameTypeVoiceSync, 0)
+	burstA.StreamID = header.StreamID
+	burstA.DMRData = makeVoiceDMRData(true)
+	tr.TranslateToIPSC(burstA)
+
+	// Now send burst B (burstIndex=1) — should produce 57-byte packet
+	burstB := makeTestHBRPPacket(true, true, hbrpFrameTypeVoice, 1)
+	burstB.StreamID = header.StreamID
+	burstB.DMRData = makeVoiceDMRData(false)
+
+	result := tr.TranslateToIPSC(burstB)
+	if len(result) != 1 {
+		t.Fatalf("expected 1 voice burst packet, got %d", len(result))
+	}
+
+	// Bursts B,C,D,F should be 57 bytes
+	if len(result[0]) != 57 {
+		t.Fatalf("expected burst B to be 57 bytes, got %d", len(result[0]))
+	}
+
+	// Check slot type byte — TS2
+	slotByte := result[0][30]
+	if slotByte != ipscBurstSlot2 {
+		t.Fatalf("expected slot2 burst type 0x%02X, got 0x%02X", ipscBurstSlot2, slotByte)
+	}
+
+	// Check length byte
+	if result[0][31] != 0x19 {
+		t.Fatalf("expected length byte 0x19, got 0x%02X", result[0][31])
+	}
+
+	// Unknown field
+	if result[0][32] != 0x06 {
+		t.Fatalf("expected unknown field 0x06, got 0x%02X", result[0][32])
+	}
+}
+
+func TestBuildVoiceBurstE(t *testing.T) {
+	t.Parallel()
+	tr := newTestTranslator(t)
+
+	// Establish stream
+	header := makeTestHBRPPacket(true, false, hbrpFrameTypeDataSync, 1)
+	tr.TranslateToIPSC(header)
+
+	// Send bursts A-D to advance burstIndex to 4
+	for i := 0; i < 4; i++ {
+		ft := hbrpFrameTypeVoice
+		if i == 0 {
+			ft = hbrpFrameTypeVoiceSync
+		}
+		pkt := makeTestHBRPPacket(true, false, ft, uint(i))
+		pkt.StreamID = header.StreamID
+		pkt.DMRData = makeVoiceDMRData(i == 0)
+		tr.TranslateToIPSC(pkt)
+	}
+
+	// Now send burst E (burstIndex=4) — should produce 66-byte packet
+	burstE := makeTestHBRPPacket(true, false, hbrpFrameTypeVoice, 4)
+	burstE.StreamID = header.StreamID
+	burstE.DMRData = makeVoiceDMRData(false)
+	burstE.Src = 0x112233
+	burstE.Dst = 0x445566
+
+	result := tr.TranslateToIPSC(burstE)
+	if len(result) != 1 {
+		t.Fatalf("expected 1 voice burst packet, got %d", len(result))
+	}
+
+	// Burst E should be 66 bytes
+	if len(result[0]) != 66 {
+		t.Fatalf("expected burst E to be 66 bytes, got %d", len(result[0]))
+	}
+
+	// Check length byte
+	if result[0][31] != 0x22 {
+		t.Fatalf("expected length byte 0x22 for burst E, got 0x%02X", result[0][31])
+	}
+
+	// Unknown field
+	if result[0][32] != 0x16 {
+		t.Fatalf("expected unknown field 0x16 for burst E, got 0x%02X", result[0][32])
+	}
+
+	// Check that dst is repeated at bytes 59-61
+	dstRepeated := uint(result[0][59])<<16 | uint(result[0][60])<<8 | uint(result[0][61])
+	if dstRepeated != 0x445566 {
+		t.Fatalf("expected dst 0x445566 at bytes 59-61, got 0x%06X", dstRepeated)
+	}
+
+	// Check that src is repeated at bytes 62-64
+	srcRepeated := uint(result[0][62])<<16 | uint(result[0][63])<<8 | uint(result[0][64])
+	if srcRepeated != 0x112233 {
+		t.Fatalf("expected src 0x112233 at bytes 62-64, got 0x%06X", srcRepeated)
+	}
+
+	// Trailer byte
+	if result[0][65] != 0x14 {
+		t.Fatalf("expected trailer byte 0x14, got 0x%02X", result[0][65])
+	}
+}
+
+func TestBuildVoiceBurstSkipsDataBurst(t *testing.T) {
+	t.Parallel()
+	tr := newTestTranslator(t)
+
+	// Establish stream
+	header := makeTestHBRPPacket(true, false, hbrpFrameTypeDataSync, 1)
+	tr.TranslateToIPSC(header)
+
+	// Build a DMR data burst (not voice) — the burst decodes as IsData=true
+	dataDMR := layer2.BuildLCDataBurst([12]byte{}, elements.DataTypeVoiceLCHeader, 0)
+
+	pkt := makeTestHBRPPacket(true, false, hbrpFrameTypeVoice, 0)
+	pkt.StreamID = header.StreamID
+	pkt.DMRData = dataDMR
+
+	result := tr.TranslateToIPSC(pkt)
+	if result != nil {
+		t.Fatalf("expected nil for data burst in voice stream, got %d packets", len(result))
+	}
+}
+
+func TestBuildVoiceBurstWrapsAfterF(t *testing.T) {
+	t.Parallel()
+	tr := newTestTranslator(t)
+
+	// Establish stream
+	header := makeTestHBRPPacket(true, false, hbrpFrameTypeDataSync, 1)
+	tr.TranslateToIPSC(header)
+
+	// Send 6 bursts (A-F) to complete one superframe
+	for i := 0; i < 6; i++ {
+		ft := hbrpFrameTypeVoice
+		if i == 0 {
+			ft = hbrpFrameTypeVoiceSync
+		}
+		pkt := makeTestHBRPPacket(true, false, ft, uint(i))
+		pkt.StreamID = header.StreamID
+		pkt.DMRData = makeVoiceDMRData(i == 0)
+		tr.TranslateToIPSC(pkt)
+	}
+
+	// The 7th burst should wrap to index 0 (burst A again) → 52 bytes
+	pkt := makeTestHBRPPacket(true, false, hbrpFrameTypeVoiceSync, 0)
+	pkt.StreamID = header.StreamID
+	pkt.DMRData = makeVoiceDMRData(true)
+
+	result := tr.TranslateToIPSC(pkt)
+	if len(result) != 1 {
+		t.Fatalf("expected 1 packet, got %d", len(result))
+	}
+	if len(result[0]) != 52 {
+		t.Fatalf("expected 52 bytes (burst A after wrap), got %d", len(result[0]))
+	}
+}
+
+func TestBuildHBRPVoiceBurstFromSlot1(t *testing.T) {
+	t.Parallel()
+	tr := newTestTranslator(t)
+
+	// Send header to establish reverse stream
+	header := makeTestIPSCPacket(0x80, ipscBurstVoiceHead, true, false)
+	tr.TranslateToHBRP(0x80, header)
+
+	// Build an IPSC voice burst (slot1 = burst A, 52 bytes)
+	burstData := make([]byte, 52)
+	copy(burstData[:18], header[:18]) // reuse IPSC header
+	burstData[30] = ipscBurstSlot1
+	burstData[31] = 0x14
+	burstData[32] = 0x40
+	// AMBE data at bytes 33-51 (19 bytes, zeros = silence)
+
+	result := tr.TranslateToHBRP(0x80, burstData)
+	if len(result) != 1 {
+		t.Fatalf("expected 1 HBRP packet for voice burst, got %d", len(result))
+	}
+
+	pkt := result[0]
+	if pkt.Signature != "DMRD" {
+		t.Fatalf("expected DMRD signature, got %q", pkt.Signature)
+	}
+	if pkt.Src != 100 {
+		t.Fatalf("expected src 100, got %d", pkt.Src)
+	}
+	if pkt.Dst != 200 {
+		t.Fatalf("expected dst 200, got %d", pkt.Dst)
+	}
+	if !pkt.GroupCall {
+		t.Fatal("expected GroupCall=true")
+	}
+	if pkt.Slot {
+		t.Fatal("expected Slot=false for TS1")
+	}
+	// First voice burst (burstIndex=0) should be voice sync
+	if pkt.FrameType != hbrpFrameTypeVoiceSync {
+		t.Fatalf("expected frame type %d (voice sync), got %d", hbrpFrameTypeVoiceSync, pkt.FrameType)
+	}
+	if pkt.DTypeOrVSeq != 0 {
+		t.Fatalf("expected DTypeOrVSeq 0 (burst A), got %d", pkt.DTypeOrVSeq)
+	}
+}
+
+func TestBuildHBRPVoiceBurstSequencing(t *testing.T) {
+	t.Parallel()
+	tr := newTestTranslator(t)
+
+	// Establish reverse stream with a header
+	header := makeTestIPSCPacket(0x80, ipscBurstVoiceHead, true, false)
+	binary.BigEndian.PutUint32(header[13:17], 0xEEEE)
+	tr.TranslateToHBRP(0x80, header)
+
+	// Send 3 voice bursts and verify sequencing
+	for i := 0; i < 3; i++ {
+		burstData := make([]byte, 52)
+		copy(burstData[:18], header[:18])
+		binary.BigEndian.PutUint32(burstData[13:17], 0xEEEE)
+		burstData[30] = ipscBurstSlot1
+		burstData[31] = 0x14
+		burstData[32] = 0x40
+
+		result := tr.TranslateToHBRP(0x80, burstData)
+		if len(result) != 1 {
+			t.Fatalf("burst %d: expected 1 packet, got %d", i, len(result))
+		}
+
+		pkt := result[0]
+		if pkt.DTypeOrVSeq != uint(i) {
+			t.Fatalf("burst %d: expected DTypeOrVSeq %d, got %d", i, i, pkt.DTypeOrVSeq)
+		}
+		// Burst 0 = voice sync, rest = voice
+		if i == 0 {
+			if pkt.FrameType != hbrpFrameTypeVoiceSync {
+				t.Fatalf("burst 0: expected voice sync frame type, got %d", pkt.FrameType)
+			}
+		} else {
+			if pkt.FrameType != hbrpFrameTypeVoice {
+				t.Fatalf("burst %d: expected voice frame type, got %d", i, pkt.FrameType)
+			}
+		}
+		if pkt.Seq != uint(i+1) { // seq starts at 1 after header consumed seq=0
+			t.Fatalf("burst %d: expected seq %d, got %d", i, i+1, pkt.Seq)
+		}
+	}
+}
+
+func TestBuildHBRPVoiceBurstWrapsAt6(t *testing.T) {
+	t.Parallel()
+	tr := newTestTranslator(t)
+
+	header := makeTestIPSCPacket(0x80, ipscBurstVoiceHead, true, false)
+	binary.BigEndian.PutUint32(header[13:17], 0xFFFF)
+	tr.TranslateToHBRP(0x80, header)
+
+	// Send 7 voice bursts — the 7th should wrap to burstIndex 0 (voice sync again)
+	for i := 0; i < 7; i++ {
+		burstData := make([]byte, 52)
+		copy(burstData[:18], header[:18])
+		binary.BigEndian.PutUint32(burstData[13:17], 0xFFFF)
+		burstData[30] = ipscBurstSlot1
+		burstData[31] = 0x14
+		burstData[32] = 0x40
+
+		result := tr.TranslateToHBRP(0x80, burstData)
+		if len(result) != 1 {
+			t.Fatalf("burst %d: expected 1 packet, got %d", i, len(result))
+		}
+
+		pkt := result[0]
+		expectedIdx := i % 6
+		if pkt.DTypeOrVSeq != uint(expectedIdx) {
+			t.Fatalf("burst %d: expected DTypeOrVSeq %d, got %d", i, expectedIdx, pkt.DTypeOrVSeq)
+		}
+	}
+}
+
+func TestBuildHBRPVoiceBurstSlot2(t *testing.T) {
+	t.Parallel()
+	tr := newTestTranslator(t)
+
+	header := makeTestIPSCPacket(0x80, ipscBurstVoiceHead, true, true)
+	binary.BigEndian.PutUint32(header[13:17], 0x1111)
+	tr.TranslateToHBRP(0x80, header)
+
+	burstData := make([]byte, 52)
+	copy(burstData[:18], header[:18])
+	binary.BigEndian.PutUint32(burstData[13:17], 0x1111)
+	burstData[30] = ipscBurstSlot2
+	burstData[31] = 0x14
+	burstData[32] = 0x40
+
+	result := tr.TranslateToHBRP(0x80, burstData)
+	if len(result) != 1 {
+		t.Fatalf("expected 1 packet, got %d", len(result))
+	}
+	if !result[0].Slot {
+		t.Fatal("expected Slot=true for TS2 voice burst")
+	}
+}
+
+func TestBuildHBRPVoiceBurstTooShort(t *testing.T) {
+	t.Parallel()
+	tr := newTestTranslator(t)
+
+	// Establish reverse stream
+	header := makeTestIPSCPacket(0x80, ipscBurstVoiceHead, true, false)
+	binary.BigEndian.PutUint32(header[13:17], 0x2222)
+	tr.TranslateToHBRP(0x80, header)
+
+	// Send a voice burst packet that is too short (< 52 bytes)
+	burstData := make([]byte, 40)
+	copy(burstData[:18], header[:18])
+	binary.BigEndian.PutUint32(burstData[13:17], 0x2222)
+	burstData[30] = ipscBurstSlot1
+
+	result := tr.TranslateToHBRP(0x80, burstData)
+	if result != nil {
+		t.Fatalf("expected nil for too-short voice burst, got %d packets", len(result))
+	}
+}
+
+func TestBuildHBRPVoiceBurstPrivateCall(t *testing.T) {
+	t.Parallel()
+	tr := newTestTranslator(t)
+
+	header := makeTestIPSCPacket(0x81, ipscBurstVoiceHead, false, false)
+	binary.BigEndian.PutUint32(header[13:17], 0x3333)
+	tr.TranslateToHBRP(0x81, header)
+
+	burstData := make([]byte, 52)
+	copy(burstData[:18], header[:18])
+	binary.BigEndian.PutUint32(burstData[13:17], 0x3333)
+	burstData[30] = ipscBurstSlot1
+	burstData[31] = 0x14
+	burstData[32] = 0x40
+
+	result := tr.TranslateToHBRP(0x81, burstData)
+	if len(result) != 1 {
+		t.Fatalf("expected 1 packet, got %d", len(result))
+	}
+	if result[0].GroupCall {
+		t.Fatal("expected GroupCall=false for private call voice burst")
+	}
+}
+
+func TestPopulateEmbeddedSignallingBurstB(t *testing.T) {
+	t.Parallel()
+	tr := newTestTranslator(t)
+
+	var burst layer2.Burst
+	burst.HasEmbeddedSignalling = true
+
+	// Burst B with 57-byte packet (5 bytes embedded data at [52:57])
+	ipscData := make([]byte, 57)
+	ipscData[52] = 0xAB
+	ipscData[53] = 0xCD
+	ipscData[54] = 0xEF
+	ipscData[55] = 0x12
+
+	tr.populateEmbeddedSignalling(&burst, 1, ipscData)
+
+	// Burst B (index 1) should have LCSS = FirstFragmentLC
+	if burst.EmbeddedSignalling.LCSS != enums.FirstFragmentLC {
+		t.Fatalf("expected LCSS FirstFragmentLC, got %d", burst.EmbeddedSignalling.LCSS)
+	}
+
+	// Check that embedded data was unpacked
+	packed := burst.PackEmbeddedSignallingData()
+	if packed[0] != 0xAB || packed[1] != 0xCD || packed[2] != 0xEF || packed[3] != 0x12 {
+		t.Fatalf("expected embedded data [AB CD EF 12], got [%02X %02X %02X %02X]",
+			packed[0], packed[1], packed[2], packed[3])
+	}
+}
+
+func TestPopulateEmbeddedSignallingBurstE(t *testing.T) {
+	t.Parallel()
+	tr := newTestTranslator(t)
+
+	var burst layer2.Burst
+	burst.HasEmbeddedSignalling = true
+
+	// Burst E with 66-byte packet (7 bytes embedded data at [52:59])
+	ipscData := make([]byte, 66)
+	ipscData[52] = 0x11
+	ipscData[53] = 0x22
+	ipscData[54] = 0x33
+	ipscData[55] = 0x44
+
+	tr.populateEmbeddedSignalling(&burst, 4, ipscData)
+
+	// Burst E (index 4) should have LCSS = LastFragmentLCorCSBK
+	if burst.EmbeddedSignalling.LCSS != enums.LastFragmentLCorCSBK {
+		t.Fatalf("expected LCSS LastFragmentLCorCSBK, got %d", burst.EmbeddedSignalling.LCSS)
+	}
+
+	packed := burst.PackEmbeddedSignallingData()
+	if packed[0] != 0x11 || packed[1] != 0x22 || packed[2] != 0x33 || packed[3] != 0x44 {
+		t.Fatalf("expected embedded data [11 22 33 44], got [%02X %02X %02X %02X]",
+			packed[0], packed[1], packed[2], packed[3])
+	}
+}
+
+func TestPopulateEmbeddedSignallingContinuation(t *testing.T) {
+	t.Parallel()
+	tr := newTestTranslator(t)
+
+	var burst layer2.Burst
+	burst.HasEmbeddedSignalling = true
+
+	// Bursts C, D, F should all get ContinuationFragmentLCorCSBK
+	for _, idx := range []int{2, 3, 5} {
+		ipscData := make([]byte, 57)
+		tr.populateEmbeddedSignalling(&burst, idx, ipscData)
+		if burst.EmbeddedSignalling.LCSS != enums.ContinuationFragmentLCorCSBK {
+			t.Fatalf("burst index %d: expected LCSS ContinuationFragmentLCorCSBK, got %d",
+				idx, burst.EmbeddedSignalling.LCSS)
+		}
+	}
+}
+
+func TestPopulateEmbeddedSignallingNoEmbeddedData(t *testing.T) {
+	t.Parallel()
+	tr := newTestTranslator(t)
+
+	var burst layer2.Burst
+	burst.HasEmbeddedSignalling = true
+
+	// A 52-byte packet doesn't match 57 or 66, so no embedded data is extracted
+	ipscData := make([]byte, 52)
+	tr.populateEmbeddedSignalling(&burst, 1, ipscData)
+
+	// LCSS should still be set
+	if burst.EmbeddedSignalling.LCSS != enums.FirstFragmentLC {
+		t.Fatalf("expected LCSS FirstFragmentLC, got %d", burst.EmbeddedSignalling.LCSS)
+	}
+
+	// Embedded data should remain empty (all zeros)
+	packed := burst.PackEmbeddedSignallingData()
+	for i, b := range packed {
+		if b != 0 {
+			t.Fatalf("expected zero embedded data byte %d, got 0x%02X", i, b)
+		}
 	}
 }
