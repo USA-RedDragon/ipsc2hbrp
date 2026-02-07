@@ -139,6 +139,17 @@ func (s *IPSCServer) netlink() error {
 		return fmt.Errorf("cannot find interface %s: %w", s.cfg.IPSC.Interface, err)
 	}
 
+	// Remove any existing addresses from the interface
+	existingAddrs, err := netlink.AddrList(link, netlink.FAMILY_ALL)
+	if err != nil {
+		return fmt.Errorf("cannot list addresses on interface %s: %w", s.cfg.IPSC.Interface, err)
+	}
+	for i := range existingAddrs {
+		if err := netlink.AddrDel(link, &existingAddrs[i]); err != nil {
+			return fmt.Errorf("cannot remove address %s from interface %s: %w", existingAddrs[i].IPNet, s.cfg.IPSC.Interface, err)
+		}
+	}
+
 	if err := netlink.AddrReplace(link, &netlink.Addr{IPNet: &net.IPNet{IP: net.ParseIP(s.cfg.IPSC.IP), Mask: net.CIDRMask(s.cfg.IPSC.SubnetMask, 32)}}); err != nil {
 		return fmt.Errorf("cannot add IP address to interface %s: %w", s.cfg.IPSC.Interface, err)
 	}
