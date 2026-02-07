@@ -5,7 +5,7 @@ go 1.25.7
 require (
 	github.com/USA-RedDragon/configulator v0.0.3
 	github.com/USA-RedDragon/dmrgo v0.0.0-20260207055200-dafba96ceab4
-	github.com/lmittmann/tint v1.1.2
+	github.com/lmittmann/tint v1.1.3
 	github.com/spf13/cobra v1.10.2
 	github.com/vishvananda/netlink v1.3.1
 	github.com/ztrue/shutdown v0.1.1
