@@ -10,8 +10,8 @@ ipsc2hbrp is a protocol bridge that translates between Motorola's IP Site Connec
 
 ```mermaid
 flowchart LR
-    A["Motorola<br>DMR Repeater"] <-->|"Ethernet<br>IPSC protocol<br>(direct cable)"| B
-    B["ipsc2hbrp<br>(Raspberry Pi <br>or Linux box)"] <-->|"Internet<br>HBRP protocol"| C
+    | A["Motorola<br>DMR Repeater"] <-->                     | "Ethernet<br>IPSC protocol<br>(direct cable)" | B |
+    | B["ipsc2hbrp<br>(Raspberry Pi <br>or Linux box)"] <--> | "Internet<br>HBRP protocol"                   | C |
     C[DMR Master Server]
 ```
 
@@ -100,20 +100,20 @@ Open your repeater's codeplug in the **Motorola Customer Programming Software (C
 
 #### Network Settings
 
-| Setting | Value |
-|---------|-------|
-| **DHCP** | **Disabled** |
-| **Ethernet IP** | A static IP on the same subnet as `ipsc.ip` (e.g. `10.10.250.2`) |
-| **Gateway IP** | The `ipsc.ip` value from your config (e.g. `10.10.250.1`) |
-| **Gateway Netmask** | Matching your `subnet-mask` (e.g. `255.255.255.0` for `/24`) |
+|       Setting       |                              Value                               |
+| ------------------- | ---------------------------------------------------------------- |
+| **DHCP**            | **Disabled**                                                     |
+| **Ethernet IP**     | A static IP on the same subnet as `ipsc.ip` (e.g. `10.10.250.2`) |
+| **Gateway IP**      | The `ipsc.ip` value from your config (e.g. `10.10.250.1`)        |
+| **Gateway Netmask** | Matching your `subnet-mask` (e.g. `255.255.255.0` for `/24`)     |
 
 #### Link Establishment
 
-| Setting | Value |
-|---------|-------|
-| **Link Type** | **Peer** |
-| **Master IP** | The `ipsc.ip` value from your config (e.g. `10.10.250.1`) |
-| **Master UDP Port** | The `ipsc.port` value from your config (e.g. `50000`) |
+|        Setting         |                                                              Value                                                              |
+| ---------------------- | ------------------------------------------------------------------------------------------------------------------------------- |
+| **Link Type**          | **Peer**                                                                                                                        |
+| **Master IP**          | The `ipsc.ip` value from your config (e.g. `10.10.250.1`)                                                                       |
+| **Master UDP Port**    | The `ipsc.port` value from your config (e.g. `50000`)                                                                           |
 | **Authentication Key** | *(Optional)* Up to 40 hex characters. If set, enable `ipsc.auth.enabled` and put the same key in `ipsc.auth.key` in the config. |
 
 Write the codeplug to the repeater.
@@ -183,29 +183,29 @@ sudo journalctl -u ipsc2hbrp -f
 
 All settings can also be set via **environment variables** using `_` as a separator (e.g. `IPSC_PORT=50000`, `HBRP_MASTER_SERVER=...`).
 
-| Setting | Type | Default | Description |
-|---------|------|---------|-------------|
-| `log-level` | string | `info` | Log verbosity: `debug`, `info`, `warn`, `error` |
-| `ipsc.interface` | string | - | Network interface connected to the repeater |
-| `ipsc.port` | uint16 | - | UDP listen port |
-| `ipsc.ip` | string | `10.10.250.1` | IP address to assign to the interface |
-| `ipsc.subnet-mask` | int | `24` | CIDR subnet mask (1–32) |
-| `ipsc.auth.enabled` | bool | `false` | Enable IPSC authentication |
-| `ipsc.auth.key` | string | - | Hex authentication key (up to 40 chars) |
-| `hbrp.master-server` | string | - | BrandMeister master `host:port` |
-| `hbrp.password` | string | - | BrandMeister hotspot password |
-| `hbrp.callsign` | string | - | Your amateur radio callsign |
-| `hbrp.radio-id` | uint32 | - | Your registered DMR repeater ID |
-| `hbrp.rx-freq` | uint | - | Receive frequency in Hz |
-| `hbrp.tx-freq` | uint | - | Transmit frequency in Hz |
-| `hbrp.tx-power` | uint8 | `0` | Transmit power in dBm |
-| `hbrp.color-code` | uint8 | `0` | DMR color code (0–15) |
-| `hbrp.latitude` | float64 | `0` | Latitude (−90 to +90) |
-| `hbrp.longitude` | float64 | `0` | Longitude (−180 to +180) |
-| `hbrp.height` | uint16 | `0` | Antenna height in meters |
-| `hbrp.location` | string | - | Location description |
-| `hbrp.description` | string | - | Repeater description |
-| `hbrp.url` | string | - | Repeater URL |
+|       Setting        |  Type   |    Default    |                   Description                   |
+| -------------------- | ------- | ------------- | ----------------------------------------------- |
+| `log-level`          | string  | `info`        | Log verbosity: `debug`, `info`, `warn`, `error` |
+| `ipsc.interface`     | string  | -             | Network interface connected to the repeater     |
+| `ipsc.port`          | uint16  | -             | UDP listen port                                 |
+| `ipsc.ip`            | string  | `10.10.250.1` | IP address to assign to the interface           |
+| `ipsc.subnet-mask`   | int     | `24`          | CIDR subnet mask (1–32)                         |
+| `ipsc.auth.enabled`  | bool    | `false`       | Enable IPSC authentication                      |
+| `ipsc.auth.key`      | string  | -             | Hex authentication key (up to 40 chars)         |
+| `hbrp.master-server` | string  | -             | BrandMeister master `host:port`                 |
+| `hbrp.password`      | string  | -             | BrandMeister hotspot password                   |
+| `hbrp.callsign`      | string  | -             | Your amateur radio callsign                     |
+| `hbrp.radio-id`      | uint32  | -             | Your registered DMR repeater ID                 |
+| `hbrp.rx-freq`       | uint    | -             | Receive frequency in Hz                         |
+| `hbrp.tx-freq`       | uint    | -             | Transmit frequency in Hz                        |
+| `hbrp.tx-power`      | uint8   | `0`           | Transmit power in dBm                           |
+| `hbrp.color-code`    | uint8   | `0`           | DMR color code (0–15)                           |
+| `hbrp.latitude`      | float64 | `0`           | Latitude (−90 to +90)                           |
+| `hbrp.longitude`     | float64 | `0`           | Longitude (−180 to +180)                        |
+| `hbrp.height`        | uint16  | `0`           | Antenna height in meters                        |
+| `hbrp.location`      | string  | -             | Location description                            |
+| `hbrp.description`   | string  | -             | Repeater description                            |
+| `hbrp.url`           | string  | -             | Repeater URL                                    |
 
 ## License
 
