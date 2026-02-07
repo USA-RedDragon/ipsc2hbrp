@@ -156,14 +156,15 @@ func (h *HBRPClient) Start() error {
 
 	h.started.Store(true)
 
-	h.wg.Add(4)
+	h.wg.Add(5)
 	go h.handler()
 	go h.rx()
 	go h.tx()
 	go h.forwardTX()
+	go h.handshakeWatchdog()
 
-	h.sendLogin()
 	h.state.Store(uint32(STATE_SENT_LOGIN))
+	h.sendLogin()
 
 	return nil
 }
@@ -280,17 +281,7 @@ func (h *HBRPClient) ping() {
 			lastPingTime := time.Unix(0, h.lastPing.Load())
 			if time.Now().After(lastPingTime.Add(h.timeout)) {
 				slog.Info("Connection timed out", "network", h.hbrpCfg.Name)
-				h.state.Store(uint32(STATE_TIMEOUT))
-				h.connMu.Lock()
-				if err := h.conn.Close(); err != nil {
-					slog.Error("Error closing connection", "network", h.hbrpCfg.Name, "error", err)
-				}
-				h.connMu.Unlock()
-				if err := h.connect(); err != nil {
-					slog.Error("Error reconnecting to HBRP server", "network", h.hbrpCfg.Name, "error", err)
-				}
-				h.sendLogin()
-				h.state.Store(uint32(STATE_SENT_LOGIN))
+				h.reconnect()
 				return
 			}
 			h.sendPing()
@@ -298,6 +289,49 @@ func (h *HBRPClient) ping() {
 			return
 		}
 	}
+}
+
+// handshakeWatchdog monitors the login/auth/config handshake and
+// triggers a reconnect if the client doesn't reach STATE_READY
+// within the timeout period. Once STATE_READY is reached the ping()
+// goroutine takes over liveness monitoring.
+func (h *HBRPClient) handshakeWatchdog() {
+	defer h.wg.Done()
+	ticker := time.NewTicker(h.timeout)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ticker.C:
+			st := state(h.state.Load())
+			if st == STATE_READY {
+				// Handshake completed, ping() is now responsible.
+				return
+			}
+			slog.Warn("Handshake timed out, reconnecting", "network", h.hbrpCfg.Name, "state", st)
+			h.reconnect()
+			// Stay in the loop to watch the next handshake attempt.
+		case <-h.done:
+			return
+		}
+	}
+}
+
+// reconnect closes the current connection, dials a new one, and
+// sends a fresh login. It is safe to call from any goroutine.
+func (h *HBRPClient) reconnect() {
+	h.state.Store(uint32(STATE_TIMEOUT))
+	h.connMu.Lock()
+	if h.conn != nil {
+		if err := h.conn.Close(); err != nil {
+			slog.Error("Error closing connection", "network", h.hbrpCfg.Name, "error", err)
+		}
+	}
+	h.connMu.Unlock()
+	if err := h.connect(); err != nil {
+		slog.Error("Error reconnecting to HBRP server", "network", h.hbrpCfg.Name, "error", err)
+	}
+	h.state.Store(uint32(STATE_SENT_LOGIN))
+	h.sendLogin()
 }
 
 func (h *HBRPClient) tx() {
@@ -324,14 +358,27 @@ func (h *HBRPClient) tx() {
 func (h *HBRPClient) rx() {
 	defer h.wg.Done()
 	for {
-		data := make([]byte, 128)
 		h.connMu.Lock()
 		conn := h.conn
 		h.connMu.Unlock()
+		data := make([]byte, 128)
 		n, err := conn.Read(data)
 		if err != nil {
-			if !h.started.Load() || errors.Is(err, net.ErrClosed) {
+			if !h.started.Load() {
 				return
+			}
+			// If the connection was closed (e.g. by ping() during
+			// reconnect), loop back and pick up the new h.conn
+			// instead of exiting the goroutine.
+			if errors.Is(err, net.ErrClosed) {
+				// Small sleep to avoid a tight loop while the
+				// reconnect in ping() replaces h.conn.
+				select {
+				case <-time.After(100 * time.Millisecond):
+					continue
+				case <-h.done:
+					return
+				}
 			}
 			slog.Error("Error reading from HBRP server", "network", h.hbrpCfg.Name, "error", err)
 			continue
