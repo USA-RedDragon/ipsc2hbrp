@@ -29,22 +29,21 @@ Your repeater connects directly via Ethernet cable to the box running ipsc2hbrp.
 
 ### 1. Download ipsc2hbrp
 
-Download the latest binary for your platform from the [GitHub Releases](https://github.com/USA-RedDragon/ipsc2hbrp/releases/) page. For a Raspberry Pi, grab the `linux-arm64` build, for desktop Linux use `linux-amd64`. Make it executable and move it to your PATH:
+Download the latest release tarball for your platform from the [GitHub Releases](https://github.com/USA-RedDragon/ipsc2hbrp/releases/latest) page. For a Raspberry Pi, grab the [`linux_arm64`](https://github.com/USA-RedDragon/ipsc2hbrp/releases/latest) build, for desktop Linux use [`linux_amd64`](https://github.com/USA-RedDragon/ipsc2hbrp/releases/latest). Extract it and move the binary to your PATH:
 
 ```bash
-# Example for Raspberry Pi (arm64):
-wget https://github.com/USA-RedDragon/ipsc2hbrp/releases/latest/download/ipsc2hbrp-linux-arm64
-chmod +x ipsc2hbrp-linux-arm64
-sudo mv ipsc2hbrp-linux-arm64 /usr/local/bin/ipsc2hbrp
+tar xzf ipsc2hbrp_*_linux_arm64.tar.gz
+sudo mv ipsc2hbrp /usr/local/bin/ipsc2hbrp
 ```
 
 ### 2. Create the Config File
 
-Copy the example config and edit it:
+Download the example config, edit it, then move it into place:
 
 ```bash
-sudo wget -O /etc/ipsc2hbrp.yaml https://raw.githubusercontent.com/USA-RedDragon/ipsc2hbrp/main/config.example.yaml
-sudo nano /etc/ipsc2hbrp.yaml
+wget https://raw.githubusercontent.com/USA-RedDragon/ipsc2hbrp/main/config.example.yaml -O ipsc2hbrp.yaml
+nano ipsc2hbrp.yaml
+sudo mv ipsc2hbrp.yaml /etc/ipsc2hbrp.yaml
 ```
 
 Here is the full example config with comments:
