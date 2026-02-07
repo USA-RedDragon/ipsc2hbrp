@@ -6,6 +6,8 @@ import (
 	"encoding/binary"
 	"errors"
 	"net"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -462,5 +464,1109 @@ func TestUpsertPeerRegistrationStatus(t *testing.T) {
 	}
 	if time.Since(lastSeen) > time.Second {
 		t.Fatal("expected LastSeen to be recent")
+	}
+}
+
+// --- Helper: create a server with a real loopback UDP socket ---
+
+func newTestServerWithUDP(t *testing.T, authEnabled bool, authKey string) (*IPSCServer, *net.UDPAddr) {
+	t.Helper()
+	cfg := testConfig(authEnabled, authKey)
+	s := NewIPSCServer(cfg)
+
+	// Bind to loopback on a random port
+	conn, err := net.ListenUDP("udp", &net.UDPAddr{IP: net.IPv4(127, 0, 0, 1), Port: 0})
+	if err != nil {
+		t.Fatalf("failed to listen: %v", err)
+	}
+	s.udp = conn
+	t.Cleanup(func() {
+		s.stopped.Store(true)
+		conn.Close()
+	})
+
+	return s, conn.LocalAddr().(*net.UDPAddr)
+}
+
+// readUDP reads one datagram from the given conn with a timeout.
+func readUDP(t *testing.T, conn *net.UDPConn, timeout time.Duration) []byte {
+	t.Helper()
+	if err := conn.SetReadDeadline(time.Now().Add(timeout)); err != nil {
+		t.Fatalf("SetReadDeadline: %v", err)
+	}
+	buf := make([]byte, 1500)
+	n, _, err := conn.ReadFromUDP(buf)
+	if err != nil {
+		t.Fatalf("ReadFromUDP: %v", err)
+	}
+	return buf[:n]
+}
+
+// makeControlPacket builds a minimal control packet (type + 4-byte peer ID).
+func makeControlPacket(packetType PacketType, peerID uint32) []byte {
+	data := make([]byte, 5)
+	data[0] = byte(packetType)
+	binary.BigEndian.PutUint32(data[1:5], peerID)
+	return data
+}
+
+// makeControlPacketWithModeFlags builds a control packet with mode + flags.
+func makeControlPacketWithModeFlags(packetType PacketType, peerID uint32, mode byte, flags [4]byte) []byte {
+	data := make([]byte, 10)
+	data[0] = byte(packetType)
+	binary.BigEndian.PutUint32(data[1:5], peerID)
+	data[5] = mode
+	copy(data[6:10], flags[:])
+	return data
+}
+
+// signPacket appends an HMAC-SHA1 hash to the packet data.
+func signPacket(t *testing.T, data []byte, hexKey string) []byte {
+	t.Helper()
+	key := mustDecodeHex(t, hexKey)
+	h := hmac.New(sha1.New, key)
+	h.Write(data)
+	hash := h.Sum(nil)[:10]
+	return append(data, hash...)
+}
+
+// --- sendPacket tests ---
+
+func TestSendPacketNoAuth(t *testing.T) {
+	t.Parallel()
+	s, srvAddr := newTestServerWithUDP(t, false, "")
+
+	// Create a client UDP socket to receive the packet
+	client, err := net.ListenUDP("udp", &net.UDPAddr{IP: net.IPv4(127, 0, 0, 1), Port: 0})
+	if err != nil {
+		t.Fatalf("client listen: %v", err)
+	}
+	defer client.Close()
+	clientAddr := client.LocalAddr().(*net.UDPAddr)
+
+	// Send a packet to the client
+	_ = srvAddr // server address, not needed directly
+	payload := []byte("hello")
+	pkt := &Packet{data: payload}
+	if err := s.sendPacket(pkt, clientAddr); err != nil {
+		t.Fatalf("sendPacket error: %v", err)
+	}
+
+	got := readUDP(t, client, time.Second)
+	if string(got) != "hello" {
+		t.Fatalf("expected 'hello', got %q", got)
+	}
+}
+
+func TestSendPacketWithAuth(t *testing.T) {
+	t.Parallel()
+	hexKey := "0000000000000000000000000000000000001234"
+	s, _ := newTestServerWithUDP(t, true, "1234")
+
+	client, err := net.ListenUDP("udp", &net.UDPAddr{IP: net.IPv4(127, 0, 0, 1), Port: 0})
+	if err != nil {
+		t.Fatalf("client listen: %v", err)
+	}
+	defer client.Close()
+	clientAddr := client.LocalAddr().(*net.UDPAddr)
+
+	payload := []byte("secure")
+	pkt := &Packet{data: payload}
+	if err := s.sendPacket(pkt, clientAddr); err != nil {
+		t.Fatalf("sendPacket error: %v", err)
+	}
+
+	got := readUDP(t, client, time.Second)
+	// Should be payload + 10-byte HMAC
+	if len(got) != len(payload)+10 {
+		t.Fatalf("expected %d bytes (payload+hash), got %d", len(payload)+10, len(got))
+	}
+
+	// Verify the HMAC
+	authKey := mustDecodeHex(t, hexKey)
+	h := hmac.New(sha1.New, authKey)
+	h.Write(payload)
+	expectedHash := h.Sum(nil)[:10]
+	if !hmac.Equal(got[len(payload):], expectedHash) {
+		t.Fatal("HMAC mismatch on sent packet")
+	}
+}
+
+// --- Handler flows with real UDP ---
+
+func TestHandleMasterRegisterRequestFlow(t *testing.T) {
+	t.Parallel()
+	s, srvAddr := newTestServerWithUDP(t, false, "")
+
+	client, err := net.DialUDP("udp", nil, srvAddr)
+	if err != nil {
+		t.Fatalf("dial: %v", err)
+	}
+	defer client.Close()
+
+	// Build a register request with mode and flags
+	peerID := uint32(55555)
+	reqData := makeControlPacketWithModeFlags(PacketType_MasterRegisterRequest, peerID, 0x6A, [4]byte{0, 0, 0, 0x0D})
+	_, err = s.handlePacket(reqData, client.LocalAddr().(*net.UDPAddr))
+	if err != nil {
+		t.Fatalf("handlePacket error: %v", err)
+	}
+
+	// Verify peer was registered
+	s.mu.RLock()
+	peer, ok := s.peers[peerID]
+	s.mu.RUnlock()
+	if !ok {
+		t.Fatal("expected peer to be registered")
+	}
+	if peer.Mode != 0x6A {
+		t.Fatalf("expected mode 0x6A, got 0x%02X", peer.Mode)
+	}
+	if !peer.RegistrationStatus {
+		t.Fatal("expected peer registered=true")
+	}
+
+	// Verify reply was sent
+	reply := readUDP(t, client, time.Second)
+	if reply[0] != byte(PacketType_MasterRegisterReply) {
+		t.Fatalf("expected register reply type 0x%02X, got 0x%02X", PacketType_MasterRegisterReply, reply[0])
+	}
+}
+
+func TestHandleMasterRegisterRequestShortPacket(t *testing.T) {
+	t.Parallel()
+	s, srvAddr := newTestServerWithUDP(t, false, "")
+
+	client, err := net.DialUDP("udp", nil, srvAddr)
+	if err != nil {
+		t.Fatalf("dial: %v", err)
+	}
+	defer client.Close()
+
+	// Short register request (no mode/flags) — should still work using defaults
+	reqData := makeControlPacket(PacketType_MasterRegisterRequest, 77777)
+	_, err = s.handlePacket(reqData, client.LocalAddr().(*net.UDPAddr))
+	if err != nil {
+		t.Fatalf("handlePacket error: %v", err)
+	}
+
+	s.mu.RLock()
+	peer := s.peers[77777]
+	s.mu.RUnlock()
+	if peer == nil {
+		t.Fatal("expected peer to exist")
+	}
+	// Mode should be the default
+	if peer.Mode != s.defaultModeByte() {
+		t.Fatalf("expected default mode, got 0x%02X", peer.Mode)
+	}
+}
+
+func TestHandleMasterAliveRequestFlow(t *testing.T) {
+	t.Parallel()
+	s, srvAddr := newTestServerWithUDP(t, false, "")
+
+	client, err := net.DialUDP("udp", nil, srvAddr)
+	if err != nil {
+		t.Fatalf("dial: %v", err)
+	}
+	defer client.Close()
+
+	peerID := uint32(66666)
+	reqData := makeControlPacket(PacketType_MasterAliveRequest, peerID)
+	_, err = s.handlePacket(reqData, client.LocalAddr().(*net.UDPAddr))
+	if err != nil {
+		t.Fatalf("handlePacket error: %v", err)
+	}
+
+	// Verify peer was marked alive
+	s.mu.RLock()
+	peer := s.peers[peerID]
+	s.mu.RUnlock()
+	if peer == nil {
+		t.Fatal("expected peer to exist after alive request")
+	}
+	if peer.KeepAliveReceived != 1 {
+		t.Fatalf("expected 1 keepalive, got %d", peer.KeepAliveReceived)
+	}
+
+	// Verify reply was sent
+	reply := readUDP(t, client, time.Second)
+	if reply[0] != byte(PacketType_MasterAliveReply) {
+		t.Fatalf("expected alive reply type 0x%02X, got 0x%02X", PacketType_MasterAliveReply, reply[0])
+	}
+}
+
+func TestHandlePeerListRequestFlow(t *testing.T) {
+	t.Parallel()
+	s, srvAddr := newTestServerWithUDP(t, false, "")
+
+	client, err := net.DialUDP("udp", nil, srvAddr)
+	if err != nil {
+		t.Fatalf("dial: %v", err)
+	}
+	defer client.Close()
+
+	reqData := makeControlPacket(PacketType_PeerListRequest, 88888)
+	_, err = s.handlePacket(reqData, client.LocalAddr().(*net.UDPAddr))
+	if err != nil {
+		t.Fatalf("handlePacket error: %v", err)
+	}
+
+	reply := readUDP(t, client, time.Second)
+	if reply[0] != byte(PacketType_PeerListReply) {
+		t.Fatalf("expected peer list reply type 0x%02X, got 0x%02X", PacketType_PeerListReply, reply[0])
+	}
+}
+
+func TestHandlePeerListRequestTooShort(t *testing.T) {
+	t.Parallel()
+	s, srvAddr := newTestServerWithUDP(t, false, "")
+
+	client, err := net.DialUDP("udp", nil, srvAddr)
+	if err != nil {
+		t.Fatalf("dial: %v", err)
+	}
+	defer client.Close()
+
+	// Packet type + only 2 bytes (too short for peer ID)
+	data := []byte{byte(PacketType_PeerListRequest), 0x00, 0x01}
+	_, err = s.handlePacket(data, client.LocalAddr().(*net.UDPAddr))
+	if err == nil {
+		t.Fatal("expected error for too-short peer list request")
+	}
+}
+
+func TestHandleRepeaterWakeUp(t *testing.T) {
+	t.Parallel()
+	cfg := testConfig(false, "")
+	s := NewIPSCServer(cfg)
+
+	addr := &net.UDPAddr{IP: net.IPv4(10, 0, 0, 5), Port: 3000}
+	peerID := uint32(11111)
+	data := makeControlPacket(PacketType_RepeaterWakeUp, peerID)
+
+	_, err := s.handlePacket(data, addr)
+	if err != nil {
+		t.Fatalf("handlePacket error: %v", err)
+	}
+
+	s.mu.RLock()
+	peer := s.peers[peerID]
+	s.mu.RUnlock()
+	if peer == nil {
+		t.Fatal("expected peer to exist after wake-up")
+	}
+	if peer.KeepAliveReceived != 1 {
+		t.Fatalf("expected 1 keepalive, got %d", peer.KeepAliveReceived)
+	}
+}
+
+func TestHandleRepeaterWakeUpTooShort(t *testing.T) {
+	t.Parallel()
+	cfg := testConfig(false, "")
+	s := NewIPSCServer(cfg)
+
+	addr := &net.UDPAddr{IP: net.IPv4(10, 0, 0, 5), Port: 3000}
+	data := []byte{byte(PacketType_RepeaterWakeUp), 0x00}
+	_, err := s.handlePacket(data, addr)
+	if err == nil {
+		t.Fatal("expected error for too-short wake-up packet")
+	}
+}
+
+// --- User packet and burst handler tests ---
+
+func TestHandleUserPacketCallsBurstHandler(t *testing.T) {
+	t.Parallel()
+	cfg := testConfig(false, "")
+	s := NewIPSCServer(cfg)
+
+	var received atomic.Bool
+	var gotType atomic.Uint32
+	var wg sync.WaitGroup
+	wg.Add(1)
+
+	s.SetBurstHandler(func(packetType byte, data []byte, addr *net.UDPAddr) {
+		defer wg.Done()
+		received.Store(true)
+		gotType.Store(uint32(packetType))
+	})
+
+	addr := &net.UDPAddr{IP: net.IPv4(10, 0, 0, 1), Port: 1234}
+	data := make([]byte, 54)
+	data[0] = byte(PacketType_GroupVoice)
+	binary.BigEndian.PutUint32(data[1:5], 42)
+
+	_, err := s.handlePacket(data, addr)
+	if err != nil {
+		t.Fatalf("handlePacket error: %v", err)
+	}
+
+	wg.Wait()
+	if !received.Load() {
+		t.Fatal("burst handler was not called")
+	}
+	if gotType.Load() != uint32(PacketType_GroupVoice) {
+		t.Fatalf("expected packet type 0x80, got 0x%02X", gotType.Load())
+	}
+
+	// Verify peer was marked alive
+	s.mu.RLock()
+	peer := s.peers[42]
+	s.mu.RUnlock()
+	if peer == nil {
+		t.Fatal("expected peer to be created")
+	}
+}
+
+func TestHandleUserPacketNoBurstHandler(t *testing.T) {
+	t.Parallel()
+	cfg := testConfig(false, "")
+	s := NewIPSCServer(cfg)
+	// No burst handler set
+
+	addr := &net.UDPAddr{IP: net.IPv4(10, 0, 0, 1), Port: 1234}
+	data := make([]byte, 54)
+	data[0] = byte(PacketType_PrivateVoice)
+	binary.BigEndian.PutUint32(data[1:5], 43)
+
+	_, err := s.handlePacket(data, addr)
+	if err != nil {
+		t.Fatalf("handlePacket error (no handler): %v", err)
+	}
+}
+
+func TestHandleUserPacketAllTypes(t *testing.T) {
+	t.Parallel()
+
+	types := []PacketType{
+		PacketType_GroupVoice,
+		PacketType_PrivateVoice,
+		PacketType_GroupData,
+		PacketType_PrivateData,
+	}
+
+	for _, pt := range types {
+		cfg := testConfig(false, "")
+		s := NewIPSCServer(cfg)
+
+		addr := &net.UDPAddr{IP: net.IPv4(10, 0, 0, 1), Port: 1234}
+		data := make([]byte, 54)
+		data[0] = byte(pt)
+		binary.BigEndian.PutUint32(data[1:5], 50)
+
+		_, err := s.handlePacket(data, addr)
+		if err != nil {
+			t.Fatalf("handlePacket for type 0x%02X error: %v", byte(pt), err)
+		}
+	}
+}
+
+func TestHandleUserPacketTooShortForPeerID(t *testing.T) {
+	t.Parallel()
+	cfg := testConfig(false, "")
+	s := NewIPSCServer(cfg)
+
+	addr := &net.UDPAddr{IP: net.IPv4(10, 0, 0, 1), Port: 1234}
+	data := []byte{byte(PacketType_GroupVoice), 0x00, 0x01}
+
+	_, err := s.handlePacket(data, addr)
+	if err == nil {
+		t.Fatal("expected error for user packet too short for peer ID")
+	}
+}
+
+func TestHandleUserPacketBurstHandlerReceivesDataCopy(t *testing.T) {
+	t.Parallel()
+	cfg := testConfig(false, "")
+	s := NewIPSCServer(cfg)
+
+	var receivedData []byte
+	var wg sync.WaitGroup
+	wg.Add(1)
+
+	s.SetBurstHandler(func(packetType byte, data []byte, addr *net.UDPAddr) {
+		defer wg.Done()
+		receivedData = data
+	})
+
+	addr := &net.UDPAddr{IP: net.IPv4(10, 0, 0, 1), Port: 1234}
+	data := make([]byte, 20)
+	data[0] = byte(PacketType_GroupVoice)
+	binary.BigEndian.PutUint32(data[1:5], 42)
+	data[10] = 0xAA // sentinel value
+
+	_, err := s.handlePacket(data, addr)
+	if err != nil {
+		t.Fatalf("handlePacket error: %v", err)
+	}
+
+	wg.Wait()
+
+	// Mutate original to verify handler got a copy
+	data[10] = 0xFF
+	if receivedData[10] != 0xAA {
+		t.Fatal("burst handler should receive a copy of the data, not a reference")
+	}
+}
+
+// --- Auth-related handlePacket tests ---
+
+func TestHandlePacketAuthEnabledTooShort(t *testing.T) {
+	t.Parallel()
+	cfg := testConfig(true, "1234")
+	s := NewIPSCServer(cfg)
+	addr := &net.UDPAddr{IP: net.IPv4(127, 0, 0, 1), Port: 9999}
+
+	// A packet with auth enabled but only 10 bytes (not enough for payload + hash)
+	data := make([]byte, 10)
+	data[0] = byte(PacketType_MasterRegisterRequest)
+	_, err := s.handlePacket(data, addr)
+	if err == nil {
+		t.Fatal("expected error for auth-enabled packet too short")
+	}
+}
+
+func TestHandlePacketAuthEnabledBadHash(t *testing.T) {
+	t.Parallel()
+	cfg := testConfig(true, "1234")
+	s := NewIPSCServer(cfg)
+	addr := &net.UDPAddr{IP: net.IPv4(127, 0, 0, 1), Port: 9999}
+
+	// Valid-length packet but bad hash
+	payload := makeControlPacket(PacketType_MasterRegisterRequest, 12345)
+	data := append(payload, make([]byte, 10)...) // 10 zero bytes as bad hash
+	_, err := s.handlePacket(data, addr)
+	if err == nil {
+		t.Fatal("expected auth failure error")
+	}
+}
+
+func TestHandlePacketAuthEnabledSuccess(t *testing.T) {
+	t.Parallel()
+	hexKey := "0000000000000000000000000000000000001234"
+	s, srvAddr := newTestServerWithUDP(t, true, "1234")
+
+	client, err := net.DialUDP("udp", nil, srvAddr)
+	if err != nil {
+		t.Fatalf("dial: %v", err)
+	}
+	defer client.Close()
+
+	peerID := uint32(99999)
+	payload := makeControlPacket(PacketType_MasterRegisterRequest, peerID)
+	data := signPacket(t, payload, hexKey)
+
+	_, err = s.handlePacket(data, client.LocalAddr().(*net.UDPAddr))
+	if err != nil {
+		t.Fatalf("expected auth success, got error: %v", err)
+	}
+
+	// Verify peer was registered
+	s.mu.RLock()
+	_, ok := s.peers[peerID]
+	s.mu.RUnlock()
+	if !ok {
+		t.Fatal("expected peer to be registered after authenticated request")
+	}
+}
+
+func TestAuthDisabledAlwaysPasses(t *testing.T) {
+	t.Parallel()
+	cfg := testConfig(false, "")
+	s := NewIPSCServer(cfg)
+	addr := &net.UDPAddr{IP: net.IPv4(127, 0, 0, 1), Port: 9999}
+
+	// When auth is disabled, no HMAC is needed
+	data := makeControlPacket(PacketType_RepeaterWakeUp, 12345)
+	_, err := s.handlePacket(data, addr)
+	if err != nil {
+		t.Fatalf("expected no error with auth disabled, got %v", err)
+	}
+}
+
+// --- SendUserPacket tests ---
+
+func TestSendUserPacketToMultiplePeers(t *testing.T) {
+	t.Parallel()
+	s, _ := newTestServerWithUDP(t, false, "")
+
+	// Create two client sockets to receive
+	client1, err := net.ListenUDP("udp", &net.UDPAddr{IP: net.IPv4(127, 0, 0, 1), Port: 0})
+	if err != nil {
+		t.Fatalf("client1 listen: %v", err)
+	}
+	defer client1.Close()
+
+	client2, err := net.ListenUDP("udp", &net.UDPAddr{IP: net.IPv4(127, 0, 0, 1), Port: 0})
+	if err != nil {
+		t.Fatalf("client2 listen: %v", err)
+	}
+	defer client2.Close()
+
+	// Register two peers
+	s.upsertPeer(1, client1.LocalAddr().(*net.UDPAddr), 0x6A, [4]byte{})
+	s.upsertPeer(2, client2.LocalAddr().(*net.UDPAddr), 0x6A, [4]byte{})
+
+	payload := []byte("broadcast")
+	s.SendUserPacket(payload)
+
+	got1 := readUDP(t, client1, time.Second)
+	got2 := readUDP(t, client2, time.Second)
+
+	if string(got1) != "broadcast" {
+		t.Fatalf("client1 expected 'broadcast', got %q", got1)
+	}
+	if string(got2) != "broadcast" {
+		t.Fatalf("client2 expected 'broadcast', got %q", got2)
+	}
+}
+
+func TestSendUserPacketWhenStopped(t *testing.T) {
+	t.Parallel()
+	s, _ := newTestServerWithUDP(t, false, "")
+
+	client, err := net.ListenUDP("udp", &net.UDPAddr{IP: net.IPv4(127, 0, 0, 1), Port: 0})
+	if err != nil {
+		t.Fatalf("client listen: %v", err)
+	}
+	defer client.Close()
+
+	s.upsertPeer(1, client.LocalAddr().(*net.UDPAddr), 0x6A, [4]byte{})
+	s.stopped.Store(true)
+
+	s.SendUserPacket([]byte("should not arrive"))
+
+	// Try reading with a short timeout — should get nothing
+	if err := client.SetReadDeadline(time.Now().Add(100 * time.Millisecond)); err != nil {
+		t.Fatalf("SetReadDeadline: %v", err)
+	}
+	buf := make([]byte, 1500)
+	_, _, err = client.ReadFromUDP(buf)
+	if err == nil {
+		t.Fatal("expected no data when server is stopped")
+	}
+}
+
+func TestSendUserPacketNoPeers(t *testing.T) {
+	t.Parallel()
+	s, _ := newTestServerWithUDP(t, false, "")
+
+	// Should not panic with no peers
+	s.SendUserPacket([]byte("no peers"))
+}
+
+func TestSendUserPacketSkipsNilAddrPeers(t *testing.T) {
+	t.Parallel()
+	s, _ := newTestServerWithUDP(t, false, "")
+
+	client, err := net.ListenUDP("udp", &net.UDPAddr{IP: net.IPv4(127, 0, 0, 1), Port: 0})
+	if err != nil {
+		t.Fatalf("client listen: %v", err)
+	}
+	defer client.Close()
+
+	// Add a peer with nil addr
+	s.mu.Lock()
+	s.peers[999] = &Peer{ID: 999, Addr: nil}
+	s.mu.Unlock()
+
+	// Add a peer with a real addr
+	s.upsertPeer(1, client.LocalAddr().(*net.UDPAddr), 0x6A, [4]byte{})
+
+	s.SendUserPacket([]byte("selective"))
+
+	got := readUDP(t, client, time.Second)
+	if string(got) != "selective" {
+		t.Fatalf("expected 'selective', got %q", got)
+	}
+}
+
+func TestSendUserPacketWithAuth(t *testing.T) {
+	t.Parallel()
+	hexKey := "0000000000000000000000000000000000005678"
+	s, _ := newTestServerWithUDP(t, true, "5678")
+
+	client, err := net.ListenUDP("udp", &net.UDPAddr{IP: net.IPv4(127, 0, 0, 1), Port: 0})
+	if err != nil {
+		t.Fatalf("client listen: %v", err)
+	}
+	defer client.Close()
+
+	s.upsertPeer(1, client.LocalAddr().(*net.UDPAddr), 0x6A, [4]byte{})
+
+	payload := []byte("authenticated-broadcast")
+	s.SendUserPacket(payload)
+
+	got := readUDP(t, client, time.Second)
+	if len(got) != len(payload)+10 {
+		t.Fatalf("expected %d bytes, got %d", len(payload)+10, len(got))
+	}
+
+	// Verify HMAC on received data
+	authKey := mustDecodeHex(t, hexKey)
+	h := hmac.New(sha1.New, authKey)
+	h.Write(got[:len(got)-10])
+	if !hmac.Equal(got[len(got)-10:], h.Sum(nil)[:10]) {
+		t.Fatal("HMAC mismatch on broadcast packet")
+	}
+}
+
+func TestSendUserPacketDataIsCopied(t *testing.T) {
+	t.Parallel()
+	s, _ := newTestServerWithUDP(t, false, "")
+
+	client, err := net.ListenUDP("udp", &net.UDPAddr{IP: net.IPv4(127, 0, 0, 1), Port: 0})
+	if err != nil {
+		t.Fatalf("client listen: %v", err)
+	}
+	defer client.Close()
+
+	s.upsertPeer(1, client.LocalAddr().(*net.UDPAddr), 0x6A, [4]byte{})
+
+	payload := []byte("original")
+	s.SendUserPacket(payload)
+
+	// Mutate original after sending — should not affect what was sent
+	payload[0] = 'X'
+
+	got := readUDP(t, client, time.Second)
+	if got[0] != 'o' {
+		t.Fatal("SendUserPacket should copy data, not use original slice")
+	}
+}
+
+// --- pacePeer tests ---
+
+func TestPacePeerFirstCallNoDelay(t *testing.T) {
+	t.Parallel()
+	cfg := testConfig(false, "")
+	s := NewIPSCServer(cfg)
+
+	start := time.Now()
+	s.pacePeer(1)
+	elapsed := time.Since(start)
+
+	// First call should not sleep
+	if elapsed > 10*time.Millisecond {
+		t.Fatalf("first pacePeer took too long: %v", elapsed)
+	}
+}
+
+func TestPacePeerEnforcesInterval(t *testing.T) {
+	t.Parallel()
+	cfg := testConfig(false, "")
+	s := NewIPSCServer(cfg)
+
+	// First call establishes the timestamp
+	s.pacePeer(1)
+
+	// Second call immediately after should sleep ~30ms
+	start := time.Now()
+	s.pacePeer(1)
+	elapsed := time.Since(start)
+
+	if elapsed < 20*time.Millisecond {
+		t.Fatalf("expected pacePeer to sleep ~30ms, only waited %v", elapsed)
+	}
+}
+
+func TestPacePeerSeparatePeersIndependent(t *testing.T) {
+	t.Parallel()
+	cfg := testConfig(false, "")
+	s := NewIPSCServer(cfg)
+
+	// Pace peer 1
+	s.pacePeer(1)
+
+	// Pace peer 2 immediately — should not be delayed by peer 1
+	start := time.Now()
+	s.pacePeer(2)
+	elapsed := time.Since(start)
+
+	if elapsed > 10*time.Millisecond {
+		t.Fatalf("pacing different peer shouldn't delay, took %v", elapsed)
+	}
+}
+
+func TestPacePeerAfterInterval(t *testing.T) {
+	t.Parallel()
+	cfg := testConfig(false, "")
+	s := NewIPSCServer(cfg)
+
+	s.pacePeer(1)
+	// Wait longer than the burst interval (30ms)
+	time.Sleep(40 * time.Millisecond)
+
+	start := time.Now()
+	s.pacePeer(1)
+	elapsed := time.Since(start)
+
+	// Should not need to sleep since interval has passed
+	if elapsed > 10*time.Millisecond {
+		t.Fatalf("pacePeer should not sleep after interval passed, took %v", elapsed)
+	}
+}
+
+// --- handler() loop and Stop() tests ---
+
+func TestHandlerLoopProcessesPackets(t *testing.T) {
+	t.Parallel()
+	cfg := testConfig(false, "")
+	s := NewIPSCServer(cfg)
+
+	// Bind to loopback
+	conn, err := net.ListenUDP("udp", &net.UDPAddr{IP: net.IPv4(127, 0, 0, 1), Port: 0})
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+	s.udp = conn
+	srvAddr := conn.LocalAddr().(*net.UDPAddr)
+
+	// Start the handler goroutine
+	s.wg.Add(1)
+	go s.handler()
+
+	// Send a wake-up packet to the server
+	client, err := net.DialUDP("udp", nil, srvAddr)
+	if err != nil {
+		t.Fatalf("dial: %v", err)
+	}
+	defer client.Close()
+
+	peerID := uint32(22222)
+	data := makeControlPacket(PacketType_RepeaterWakeUp, peerID)
+	if _, err := client.Write(data); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+
+	// Poll for peer to appear (the handler processes asynchronously)
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		s.mu.RLock()
+		_, ok := s.peers[peerID]
+		s.mu.RUnlock()
+		if ok {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+
+	s.mu.RLock()
+	_, found := s.peers[peerID]
+	s.mu.RUnlock()
+	if !found {
+		t.Fatal("expected peer to be created by handler loop")
+	}
+
+	// Stop cleanly
+	s.stopped.Store(true)
+	conn.Close()
+	s.wg.Wait()
+}
+
+func TestStopIdempotent(t *testing.T) {
+	t.Parallel()
+	cfg := testConfig(false, "")
+	s := NewIPSCServer(cfg)
+
+	conn, err := net.ListenUDP("udp", &net.UDPAddr{IP: net.IPv4(127, 0, 0, 1), Port: 0})
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+	s.udp = conn
+
+	s.wg.Add(1)
+	go s.handler()
+
+	// Calling Stop multiple times should not panic
+	s.Stop()
+	s.Stop()
+	s.Stop()
+}
+
+func TestStopWithNilConn(t *testing.T) {
+	t.Parallel()
+	cfg := testConfig(false, "")
+	s := NewIPSCServer(cfg)
+	// udp is nil — Stop should not panic
+	s.Stop()
+}
+
+func TestHandlerLoopWithBurstHandler(t *testing.T) {
+	t.Parallel()
+	cfg := testConfig(false, "")
+	s := NewIPSCServer(cfg)
+
+	conn, err := net.ListenUDP("udp", &net.UDPAddr{IP: net.IPv4(127, 0, 0, 1), Port: 0})
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+	s.udp = conn
+	srvAddr := conn.LocalAddr().(*net.UDPAddr)
+
+	var received atomic.Bool
+	var wg sync.WaitGroup
+	wg.Add(1)
+	s.SetBurstHandler(func(packetType byte, data []byte, addr *net.UDPAddr) {
+		defer wg.Done()
+		received.Store(true)
+	})
+
+	s.wg.Add(1)
+	go s.handler()
+
+	client, err := net.DialUDP("udp", nil, srvAddr)
+	if err != nil {
+		t.Fatalf("dial: %v", err)
+	}
+	defer client.Close()
+
+	data := make([]byte, 54)
+	data[0] = byte(PacketType_GroupVoice)
+	binary.BigEndian.PutUint32(data[1:5], 33333)
+
+	if _, err := client.Write(data); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+
+	wg.Wait()
+	if !received.Load() {
+		t.Fatal("burst handler was not called via handler loop")
+	}
+
+	s.stopped.Store(true)
+	conn.Close()
+	s.wg.Wait()
+}
+
+// --- buildPeerList edge cases ---
+
+func TestBuildPeerListSkipsNilAddr(t *testing.T) {
+	t.Parallel()
+	cfg := testConfig(false, "")
+	s := NewIPSCServer(cfg)
+
+	s.mu.Lock()
+	s.peers[1] = &Peer{ID: 1, Addr: nil, Mode: 0x6A}
+	s.peers[2] = &Peer{ID: 2, Addr: &net.UDPAddr{IP: nil, Port: 1234}, Mode: 0x6A}
+	s.mu.Unlock()
+
+	peerList := s.buildPeerList()
+	// Both peers should be skipped (nil Addr, nil IP)
+	if len(peerList) != 0 {
+		t.Fatalf("expected empty peer list, got %d bytes", len(peerList))
+	}
+}
+
+func TestBuildPeerListMultiplePeers(t *testing.T) {
+	t.Parallel()
+	cfg := testConfig(false, "")
+	s := NewIPSCServer(cfg)
+
+	s.upsertPeer(1, &net.UDPAddr{IP: net.IPv4(10, 0, 0, 1), Port: 5000}, 0x6A, [4]byte{})
+	s.upsertPeer(2, &net.UDPAddr{IP: net.IPv4(10, 0, 0, 2), Port: 6000}, 0x6B, [4]byte{})
+
+	peerList := s.buildPeerList()
+	// Each peer entry = 4 (ID) + 4 (IP) + 2 (port) + 1 (mode) = 11 bytes
+	if len(peerList) != 22 {
+		t.Fatalf("expected 22 bytes for 2 peers, got %d", len(peerList))
+	}
+}
+
+// --- SetBurstHandler ---
+
+func TestSetBurstHandler(t *testing.T) {
+	t.Parallel()
+	cfg := testConfig(false, "")
+	s := NewIPSCServer(cfg)
+
+	if s.burstHandler != nil {
+		t.Fatal("expected nil burst handler initially")
+	}
+
+	handler := func(packetType byte, data []byte, addr *net.UDPAddr) {}
+	s.SetBurstHandler(handler)
+
+	if s.burstHandler == nil {
+		t.Fatal("expected non-nil burst handler after set")
+	}
+}
+
+// --- Full registration → alive → peer list integration test ---
+
+func TestFullRegistrationFlow(t *testing.T) {
+	t.Parallel()
+	s, srvAddr := newTestServerWithUDP(t, false, "")
+
+	client, err := net.DialUDP("udp", nil, srvAddr)
+	if err != nil {
+		t.Fatalf("dial: %v", err)
+	}
+	defer client.Close()
+	clientAddr := client.LocalAddr().(*net.UDPAddr)
+
+	peerID := uint32(44444)
+
+	// Step 1: Register
+	regReq := makeControlPacketWithModeFlags(PacketType_MasterRegisterRequest, peerID, 0x6A, [4]byte{0, 0, 0, 0x0D})
+	_, err = s.handlePacket(regReq, clientAddr)
+	if err != nil {
+		t.Fatalf("register: %v", err)
+	}
+	regReply := readUDP(t, client, time.Second)
+	if regReply[0] != byte(PacketType_MasterRegisterReply) {
+		t.Fatal("expected register reply")
+	}
+
+	// Step 2: Keep-alive
+	aliveReq := makeControlPacket(PacketType_MasterAliveRequest, peerID)
+	_, err = s.handlePacket(aliveReq, clientAddr)
+	if err != nil {
+		t.Fatalf("alive: %v", err)
+	}
+	aliveReply := readUDP(t, client, time.Second)
+	if aliveReply[0] != byte(PacketType_MasterAliveReply) {
+		t.Fatal("expected alive reply")
+	}
+
+	// Step 3: Peer list
+	peerListReq := makeControlPacket(PacketType_PeerListRequest, peerID)
+	_, err = s.handlePacket(peerListReq, clientAddr)
+	if err != nil {
+		t.Fatalf("peer list: %v", err)
+	}
+	peerListReply := readUDP(t, client, time.Second)
+	if peerListReply[0] != byte(PacketType_PeerListReply) {
+		t.Fatal("expected peer list reply")
+	}
+
+	// Verify peer state
+	s.mu.RLock()
+	peer := s.peers[peerID]
+	s.mu.RUnlock()
+
+	if peer == nil {
+		t.Fatal("expected peer to exist")
+	}
+	if !peer.RegistrationStatus {
+		t.Fatal("expected registered")
+	}
+	if peer.KeepAliveReceived < 1 {
+		t.Fatal("expected at least 1 keepalive")
+	}
+	if peer.Mode != 0x6A {
+		t.Fatalf("expected mode 0x6A, got 0x%02X", peer.Mode)
+	}
+}
+
+// --- netlink error test ---
+
+func TestNetlinkFailsBadInterface(t *testing.T) {
+	t.Parallel()
+	cfg := testConfig(false, "")
+	cfg.IPSC.Interface = "nonexistent_iface_xyz"
+	s := NewIPSCServer(cfg)
+
+	err := s.netlink()
+	if err == nil {
+		t.Fatal("expected netlink error for nonexistent interface")
+	}
+}
+
+// --- handlePacket with MasterAliveRequest too short ---
+
+func TestHandleMasterAliveRequestTooShort(t *testing.T) {
+	t.Parallel()
+	s, srvAddr := newTestServerWithUDP(t, false, "")
+
+	client, err := net.DialUDP("udp", nil, srvAddr)
+	if err != nil {
+		t.Fatalf("dial: %v", err)
+	}
+	defer client.Close()
+
+	data := []byte{byte(PacketType_MasterAliveRequest), 0x00, 0x01}
+	_, err = s.handlePacket(data, client.LocalAddr().(*net.UDPAddr))
+	if err == nil {
+		t.Fatal("expected error for too-short alive request")
+	}
+}
+
+// --- handlePacket with MasterRegisterRequest too short for peer ID ---
+
+func TestHandleMasterRegisterRequestTooShort(t *testing.T) {
+	t.Parallel()
+	s, srvAddr := newTestServerWithUDP(t, false, "")
+
+	client, err := net.DialUDP("udp", nil, srvAddr)
+	if err != nil {
+		t.Fatalf("dial: %v", err)
+	}
+	defer client.Close()
+
+	data := []byte{byte(PacketType_MasterRegisterRequest), 0x00}
+	_, err = s.handlePacket(data, client.LocalAddr().(*net.UDPAddr))
+	if err == nil {
+		t.Fatal("expected error for too-short register request")
+	}
+}
+
+// --- Verify handlePacket returns Packet on success ---
+
+func TestHandlePacketReturnsPacket(t *testing.T) {
+	t.Parallel()
+	cfg := testConfig(false, "")
+	s := NewIPSCServer(cfg)
+
+	addr := &net.UDPAddr{IP: net.IPv4(10, 0, 0, 1), Port: 1234}
+	data := makeControlPacket(PacketType_RepeaterWakeUp, 12345)
+	pkt, err := s.handlePacket(data, addr)
+	if err != nil {
+		t.Fatalf("expected no error, got %v", err)
+	}
+	if pkt == nil {
+		t.Fatal("expected non-nil packet")
+	}
+	if len(pkt.data) != len(data) {
+		t.Fatalf("expected packet data length %d, got %d", len(data), len(pkt.data))
+	}
+}
+
+// --- Verify handlePacket strips auth hash from returned data ---
+
+func TestHandlePacketStripsAuthHash(t *testing.T) {
+	t.Parallel()
+	hexKey := "0000000000000000000000000000000000001234"
+	cfg := testConfig(true, "1234")
+	s := NewIPSCServer(cfg)
+
+	addr := &net.UDPAddr{IP: net.IPv4(10, 0, 0, 1), Port: 1234}
+	payload := makeControlPacket(PacketType_RepeaterWakeUp, 12345)
+	data := signPacket(t, payload, hexKey)
+
+	pkt, err := s.handlePacket(data, addr)
+	if err != nil {
+		t.Fatalf("expected no error, got %v", err)
+	}
+	// The returned packet data should have the hash stripped
+	if len(pkt.data) != len(payload) {
+		t.Fatalf("expected data length %d (hash stripped), got %d", len(payload), len(pkt.data))
+	}
+}
+
+// --- ErrPacketIgnored is a sentinel error ---
+
+func TestErrPacketIgnoredIsSentinel(t *testing.T) {
+	t.Parallel()
+	cfg := testConfig(false, "")
+	s := NewIPSCServer(cfg)
+	addr := &net.UDPAddr{IP: net.IPv4(127, 0, 0, 1), Port: 9999}
+
+	data := makeControlPacket(PacketType_MasterRegisterReply, 12345)
+	_, err := s.handlePacket(data, addr)
+	if !errors.Is(err, ErrPacketIgnored) {
+		t.Fatalf("expected ErrPacketIgnored, got %v", err)
 	}
 }
