@@ -1,0 +1,57 @@
+name: Tests
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: read       # Required for actions/checkout
+  checks:   write      # Required for GitHub Checks API
+
+jobs:
+  benchmark-tests:
+    if: github.event_name != 'push' && github.ref != 'refs/heads/main'
+    runs-on: ubuntu-24.04
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+
+      - name: Set up Go
+        uses: actions/setup-go@d35c59abb061a4a6fb18e82ac0862c26744d6ab5 # v5
+        with:
+          go-version-file: go.mod
+
+      - run: CGO_ENABLED=0 go test -run ^$ -benchmem -bench=. ./...
+
+  race-tests:
+    if: github.event_name != 'push' && github.ref != 'refs/heads/main'
+    runs-on: ubuntu-24.04
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+
+      - name: Set up Go
+        uses: actions/setup-go@d35c59abb061a4a6fb18e82ac0862c26744d6ab5 # v5
+        with:
+          go-version-file: go.mod
+
+      - name: Race tests
+        run: go test ./... -race
+
+  unit-tests:
+    if: github.event_name != 'push' && github.ref != 'refs/heads/main'
+    uses: ./.github/workflows/unit-test.yaml
+    secrets:
+      token: ${{ secrets.GITHUB_TOKEN }}
+
+  unit-tests-coverage:
+    uses: ./.github/workflows/unit-test.yaml
+    with:
+      coverage: true
+    secrets:
+      codecov_token: ${{ secrets.CODECOV_TOKEN }}
+      token: ${{ secrets.GITHUB_TOKEN }}

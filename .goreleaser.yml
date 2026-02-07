@@ -1,0 +1,30 @@
+---
+project_name: ipsc2hbrp
+
+release:
+  extra_files:
+    - glob: ./LICENSE
+  github:
+    owner: USA-RedDragon
+    name: ipsc2hbrp
+
+builds:
+  - main: .
+    binary: ipsc2hbrp
+    goos:
+      - linux
+    goarch:
+      - amd64
+      - arm
+      - arm64
+      - riscv64
+    goarm:
+      - "6"
+      - "7"
+    env:
+      - CGO_ENABLED=0
+    flags:
+      - -trimpath
+
+milestones:
+  - close: true

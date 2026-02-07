@@ -1,0 +1,20 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+concurrency:
+  group: '${{ github.workflow }} @ ${{ github.ref }}'
+  cancel-in-progress: false
+
+jobs:
+  release:
+    name: Release
+    permissions:
+      contents: write
+      packages: write
+    uses: USA-RedDragon/reusable-actions/.github/workflows/goreleaser.yaml@01dfa5b8bca8336ab047d196c367ef4cc9025432 # v1.3.1
+    secrets:
+      token: ${{ secrets.GITHUB_TOKEN }}
