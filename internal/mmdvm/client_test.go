@@ -1,7 +1,9 @@
 package mmdvm
 
 import (
+	"bytes"
 	"crypto/sha256"
+	"encoding/binary"
 	"fmt"
 	"net"
 	"strings"
@@ -20,7 +22,7 @@ const (
 	tagRPTCL   = "RPTCL"
 	tagRPTC    = "RPTC"
 	tagRPTK    = "RPTK"
-	tagMSTPING = "MSTPING"
+	tagRPTPING = "RPTPING"
 	tagDMRD    = "DMRD"
 )
 
@@ -123,14 +125,14 @@ func TestSendLoginPacket(t *testing.T) {
 	if string(data[:4]) != tagRPTL {
 		t.Fatalf("expected RPTL prefix, got %q", string(data[:4]))
 	}
-	// Should contain the hex ID
-	hexID := fmt.Sprintf("%08x", client.cfg.ID)
-	if string(data[4:12]) != hexID {
-		t.Fatalf("expected hex ID %q, got %q", hexID, string(data[4:12]))
+	// Should contain the binary ID (big-endian uint32)
+	gotID := binary.BigEndian.Uint32(data[4:8])
+	if gotID != client.cfg.ID {
+		t.Fatalf("expected ID %d, got %d", client.cfg.ID, gotID)
 	}
-	// Total length = 4 (RPTL) + 8 (hex ID)
-	if len(data) != 12 {
-		t.Fatalf("expected 12 bytes, got %d", len(data))
+	// Total length = 4 (RPTL) + 4 (binary ID)
+	if len(data) != 8 {
+		t.Fatalf("expected 8 bytes, got %d", len(data))
 	}
 }
 
@@ -143,12 +145,12 @@ func TestSendRPTCLPacket(t *testing.T) {
 	if string(data[:5]) != tagRPTCL {
 		t.Fatalf("expected RPTCL prefix, got %q", string(data[:5]))
 	}
-	hexID := fmt.Sprintf("%08x", client.cfg.ID)
-	if string(data[5:13]) != hexID {
-		t.Fatalf("expected hex ID %q, got %q", hexID, string(data[5:13]))
+	gotID := binary.BigEndian.Uint32(data[5:9])
+	if gotID != client.cfg.ID {
+		t.Fatalf("expected ID %d, got %d", client.cfg.ID, gotID)
 	}
-	if len(data) != 13 {
-		t.Fatalf("expected 13 bytes, got %d", len(data))
+	if len(data) != 9 {
+		t.Fatalf("expected 9 bytes, got %d", len(data))
 	}
 }
 
@@ -163,40 +165,40 @@ func TestSendRPTCPacket(t *testing.T) {
 		t.Fatalf("expected RPTC prefix, got %q", string(data[:4]))
 	}
 
-	// Check callsign (8 bytes, left-justified)
-	callsign := string(data[4:12])
+	// Check binary ID (big-endian uint32, 4 bytes at offset 4)
+	gotID := binary.BigEndian.Uint32(data[4:8])
+	if gotID != client.cfg.ID {
+		t.Fatalf("expected ID %d, got %d", client.cfg.ID, gotID)
+	}
+
+	// Check callsign (8 bytes, left-justified, at offset 8)
+	callsign := string(data[8:16])
 	if !strings.HasPrefix(callsign, "N0CALL") {
 		t.Fatalf("expected callsign starting with N0CALL, got %q", callsign)
 	}
 
-	// Check hex radio ID (8 bytes)
-	hexID := fmt.Sprintf("%08x", client.cfg.ID)
-	if string(data[12:20]) != hexID {
-		t.Fatalf("expected hex ID %q at offset 12, got %q", hexID, string(data[12:20]))
-	}
-
-	// Check RX freq (9 bytes)
+	// Check RX freq (9 bytes at offset 16)
 	expectedRX := fmt.Sprintf("%09d", client.cfg.RXFreq)
-	if string(data[20:29]) != expectedRX {
-		t.Fatalf("expected RX freq %q, got %q", expectedRX, string(data[20:29]))
+	if string(data[16:25]) != expectedRX {
+		t.Fatalf("expected RX freq %q, got %q", expectedRX, string(data[16:25]))
 	}
 
-	// Check TX freq (9 bytes)
+	// Check TX freq (9 bytes at offset 25)
 	expectedTX := fmt.Sprintf("%09d", client.cfg.TXFreq)
-	if string(data[29:38]) != expectedTX {
-		t.Fatalf("expected TX freq %q, got %q", expectedTX, string(data[29:38]))
+	if string(data[25:34]) != expectedTX {
+		t.Fatalf("expected TX freq %q, got %q", expectedTX, string(data[25:34]))
 	}
 
-	// Check TX power (2 bytes)
+	// Check TX power (2 bytes at offset 34)
 	expectedPower := fmt.Sprintf("%02d", client.cfg.TXPower)
-	if string(data[38:40]) != expectedPower {
-		t.Fatalf("expected TX power %q, got %q", expectedPower, string(data[38:40]))
+	if string(data[34:36]) != expectedPower {
+		t.Fatalf("expected TX power %q, got %q", expectedPower, string(data[34:36]))
 	}
 
-	// Check color code (2 bytes)
+	// Check color code (2 bytes at offset 36)
 	expectedCC := fmt.Sprintf("%02d", client.cfg.ColorCode)
-	if string(data[40:42]) != expectedCC {
-		t.Fatalf("expected color code %q, got %q", expectedCC, string(data[40:42]))
+	if string(data[36:38]) != expectedCC {
+		t.Fatalf("expected color code %q, got %q", expectedCC, string(data[36:38]))
 	}
 }
 
@@ -212,30 +214,27 @@ func TestSendRPTKPacket(t *testing.T) {
 		t.Fatalf("expected RPTK prefix, got %q", string(data[:4]))
 	}
 
-	// Hex ID at offset 4
-	hexID := fmt.Sprintf("%08x", client.cfg.ID)
-	if string(data[4:12]) != hexID {
-		t.Fatalf("expected hex ID %q, got %q", hexID, string(data[4:12]))
+	// Binary ID at offset 4
+	gotID := binary.BigEndian.Uint32(data[4:8])
+	if gotID != client.cfg.ID {
+		t.Fatalf("expected ID %d, got %d", client.cfg.ID, gotID)
 	}
 
-	// Token at offset 12 should be 64 hex characters (sha256)
-	token := string(data[12:76])
-	if len(token) != 64 {
-		t.Fatalf("expected 64-char token, got %d", len(token))
-	}
+	// Raw SHA256 token at offset 8 (32 bytes)
+	token := data[8:40]
 
 	// Verify the token is the correct sha256(random + password)
 	s256 := sha256.New()
 	s256.Write(random)
 	s256.Write([]byte(client.cfg.Password))
-	expectedToken := fmt.Sprintf("%x", s256.Sum(nil))
-	if token != expectedToken {
-		t.Fatalf("expected token %q, got %q", expectedToken, token)
+	expectedToken := s256.Sum(nil)
+	if !bytes.Equal(token, expectedToken) {
+		t.Fatalf("expected token %x, got %x", expectedToken, token)
 	}
 
-	// Total length = 4 (RPTK) + 8 (hex ID) + 64 (token)
-	if len(data) != 76 {
-		t.Fatalf("expected 76 bytes, got %d", len(data))
+	// Total length = 4 (RPTK) + 4 (binary ID) + 32 (SHA256)
+	if len(data) != 40 {
+		t.Fatalf("expected 40 bytes, got %d", len(data))
 	}
 }
 
@@ -245,15 +244,15 @@ func TestSendPingPacket(t *testing.T) {
 	client.sendPing()
 
 	data := <-client.connTX
-	if string(data[:7]) != tagMSTPING {
-		t.Fatalf("expected MSTPING prefix, got %q", string(data[:7]))
+	if string(data[:7]) != tagRPTPING {
+		t.Fatalf("expected RPTPING prefix, got %q", string(data[:7]))
 	}
-	hexID := fmt.Sprintf("%08x", client.cfg.ID)
-	if string(data[7:15]) != hexID {
-		t.Fatalf("expected hex ID %q, got %q", hexID, string(data[7:15]))
+	gotID := binary.BigEndian.Uint32(data[7:11])
+	if gotID != client.cfg.ID {
+		t.Fatalf("expected ID %d, got %d", client.cfg.ID, gotID)
 	}
-	if len(data) != 15 {
-		t.Fatalf("expected 15 bytes, got %d", len(data))
+	if len(data) != 11 {
+		t.Fatalf("expected 11 bytes, got %d", len(data))
 	}
 }
 
@@ -309,9 +308,9 @@ func TestPacketTypeMstack(t *testing.T) {
 	}
 }
 
-func TestSendLoginHexIDFormat(t *testing.T) {
+func TestSendLoginBinaryIDFormat(t *testing.T) {
 	t.Parallel()
-	// Test with ID=1 to verify zero-padding
+	// Test with ID=1 to verify binary encoding
 	cfg := testMMDVMConfig()
 	cfg.ID = 1
 	client := &MMDVMClient{
@@ -321,9 +320,9 @@ func TestSendLoginHexIDFormat(t *testing.T) {
 	client.sendLogin()
 
 	data := <-client.connTX
-	hexID := string(data[4:12])
-	if hexID != "00000001" {
-		t.Fatalf("expected zero-padded hex ID %q, got %q", "00000001", hexID)
+	gotID := binary.BigEndian.Uint32(data[4:8])
+	if gotID != 1 {
+		t.Fatalf("expected ID 1, got %d", gotID)
 	}
 }
 
@@ -333,13 +332,13 @@ func TestSendRPTKDifferentRandomProducesDifferentToken(t *testing.T) {
 
 	client.sendRPTK([]byte("aaaaaaaa"))
 	data1 := <-client.connTX
-	token1 := string(data1[12:76])
+	token1 := data1[8:40]
 
 	client.sendRPTK([]byte("bbbbbbbb"))
 	data2 := <-client.connTX
-	token2 := string(data2[12:76])
+	token2 := data2[8:40]
 
-	if token1 == token2 {
+	if bytes.Equal(token1, token2) {
 		t.Fatal("expected different tokens for different random data")
 	}
 }
@@ -550,8 +549,8 @@ func TestHandlerSentLoginMSTACK(t *testing.T) {
 	client.wg.Add(1)
 	go client.handler()
 
-	// Simulate MSTACK response with 8-byte random suffix
-	resp := append([]byte("MSTACK"), []byte("12345678")...)
+	// Simulate RPTACK response with random suffix (last 4 bytes used)
+	resp := append([]byte("RPTACK"), []byte("12345678")...)
 	client.connRX <- resp
 
 	// Should transition to SENT_AUTH and send RPTK
@@ -581,8 +580,8 @@ func TestHandlerSentLoginRejected(t *testing.T) {
 	client.wg.Add(1)
 	go client.handler()
 
-	// Simulate rejection (not MSTACK)
-	client.connRX <- []byte("MSTNAK__________")
+	// Simulate rejection (not RPTACK)
+	client.connRX <- []byte("RPTNAK__________")
 
 	// Should retry login
 	select {
@@ -606,8 +605,8 @@ func TestHandlerSentAuthMSTACK(t *testing.T) {
 	client.wg.Add(1)
 	go client.handler()
 
-	// MSTACK means auth accepted
-	client.connRX <- []byte("MSTACK__________")
+	// RPTACK means auth accepted
+	client.connRX <- []byte("RPTACK__________")
 
 	// Should send RPTC
 	select {
@@ -636,8 +635,8 @@ func TestHandlerSentAuthMSTNAK(t *testing.T) {
 	client.wg.Add(1)
 	go client.handler()
 
-	// MSTNAK means password rejected
-	client.connRX <- []byte("MSTNAK__________")
+	// RPTNAK means password rejected
+	client.connRX <- []byte("RPTNAK__________")
 
 	// Should fall back to STATE_SENT_LOGIN and retry login
 	select {
@@ -689,14 +688,14 @@ func TestHandlerSentRPTCAccepted(t *testing.T) {
 	client.wg.Add(1)
 	go client.handler()
 
-	// MSTACK means config accepted
-	client.connRX <- []byte("MSTACK__________")
+	// RPTACK means config accepted
+	client.connRX <- []byte("RPTACK__________")
 
-	// Should transition to STATE_READY and start ping (which sends MSTPING)
+	// Should transition to STATE_READY and start ping (which sends RPTPING)
 	select {
 	case data := <-client.connTX:
-		if string(data[:7]) != tagMSTPING {
-			t.Fatalf("expected MSTPING from ping(), got %q", string(data[:min(7, len(data))]))
+		if string(data[:7]) != tagRPTPING {
+			t.Fatalf("expected RPTPING from ping(), got %q", string(data[:min(7, len(data))]))
 		}
 	case <-time.After(2 * time.Second):
 		t.Fatal("timed out waiting for MSTPING")
@@ -745,14 +744,14 @@ func TestHandlerReadyRPTPONG(t *testing.T) {
 	go client.handler()
 
 	before := time.Now().UnixNano()
-	client.connRX <- []byte("RPTPONG_________")
+	client.connRX <- []byte("MSTPONG_________")
 
 	// Give handler time
 	time.Sleep(50 * time.Millisecond)
 
 	lastPing := client.lastPing.Load()
 	if lastPing < before {
-		t.Fatal("expected lastPing to be updated after RPTPONG")
+		t.Fatal("expected lastPing to be updated after MSTPONG")
 	}
 
 	close(client.done)
@@ -922,11 +921,11 @@ func TestPingSendsInitialPing(t *testing.T) {
 	client.wg.Add(1)
 	go client.ping()
 
-	// Should send an immediate MSTPING
+	// Should send an immediate RPTPING
 	select {
 	case data := <-client.connTX:
-		if string(data[:7]) != tagMSTPING {
-			t.Fatalf("expected MSTPING, got %q", string(data[:min(7, len(data))]))
+		if string(data[:7]) != tagRPTPING {
+			t.Fatalf("expected RPTPING, got %q", string(data[:min(7, len(data))]))
 		}
 	case <-time.After(2 * time.Second):
 		t.Fatal("timed out waiting for initial MSTPING")
@@ -955,8 +954,8 @@ func TestPingSendsPeriodicPings(t *testing.T) {
 	// Wait for a periodic ping
 	select {
 	case data := <-client.connTX:
-		if string(data[:7]) != tagMSTPING {
-			t.Fatalf("expected periodic MSTPING, got %q", string(data[:min(7, len(data))]))
+		if string(data[:7]) != tagRPTPING {
+			t.Fatalf("expected periodic RPTPING, got %q", string(data[:min(7, len(data))]))
 		}
 	case <-time.After(2 * time.Second):
 		t.Fatal("timed out waiting for periodic MSTPING")
@@ -1320,10 +1319,10 @@ func TestStartAndFullHandshake(t *testing.T) {
 		t.Fatalf("expected RPTL, got %q", string(loginData[:4]))
 	}
 
-	// Step 2: Server sends MSTACK with random
-	mstack := append([]byte("MSTACK"), []byte("ABCDEFGH")...)
-	if _, err := serverConn.WriteToUDP(mstack, clientAddr); err != nil {
-		t.Fatalf("server write MSTACK: %v", err)
+	// Step 2: Server sends RPTACK with random
+	rptack := append([]byte("RPTACK"), []byte("ABCDEFGH")...)
+	if _, err := serverConn.WriteToUDP(rptack, clientAddr); err != nil {
+		t.Fatalf("server write RPTACK: %v", err)
 	}
 
 	// Step 3: Client sends RPTK
@@ -1332,9 +1331,9 @@ func TestStartAndFullHandshake(t *testing.T) {
 		t.Fatalf("expected RPTK, got %q", string(rptkData[:4]))
 	}
 
-	// Step 4: Server sends MSTACK (auth accepted)
-	if _, err := serverConn.WriteToUDP([]byte("MSTACK__________"), clientAddr); err != nil {
-		t.Fatalf("server write MSTACK: %v", err)
+	// Step 4: Server sends RPTACK (auth accepted)
+	if _, err := serverConn.WriteToUDP([]byte("RPTACK__________"), clientAddr); err != nil {
+		t.Fatalf("server write RPTACK: %v", err)
 	}
 
 	// Step 5: Client sends RPTC
@@ -1343,15 +1342,15 @@ func TestStartAndFullHandshake(t *testing.T) {
 		t.Fatalf("expected RPTC, got %q", string(rptcData[:4]))
 	}
 
-	// Step 6: Server sends MSTACK (config accepted)
-	if _, err := serverConn.WriteToUDP([]byte("MSTACK__________"), clientAddr); err != nil {
-		t.Fatalf("server write MSTACK: %v", err)
+	// Step 6: Server sends RPTACK (config accepted)
+	if _, err := serverConn.WriteToUDP([]byte("RPTACK__________"), clientAddr); err != nil {
+		t.Fatalf("server write RPTACK: %v", err)
 	}
 
-	// Step 7: Client should now be in READY state and send MSTPING
+	// Step 7: Client should now be in READY state and send RPTPING
 	pingData, _ := readFromServer(t, serverConn, 2*time.Second)
-	if string(pingData[:7]) != tagMSTPING {
-		t.Fatalf("expected MSTPING, got %q", string(pingData[:min(7, len(pingData))]))
+	if string(pingData[:7]) != tagRPTPING {
+		t.Fatalf("expected RPTPING, got %q", string(pingData[:min(7, len(pingData))]))
 	}
 
 	// Wait for state to reach READY
@@ -1368,9 +1367,9 @@ func TestStartAndFullHandshake(t *testing.T) {
 		t.Fatalf("expected STATE_READY, got %d", client.state.Load())
 	}
 
-	// Step 8: Server sends RPTPONG
-	if _, err := serverConn.WriteToUDP([]byte("RPTPONG_________"), clientAddr); err != nil {
-		t.Fatalf("server write RPTPONG: %v", err)
+	// Step 8: Server sends MSTPONG
+	if _, err := serverConn.WriteToUDP([]byte("MSTPONG_________"), clientAddr); err != nil {
+		t.Fatalf("server write MSTPONG: %v", err)
 	}
 
 	// Give handler time to process
@@ -1378,7 +1377,7 @@ func TestStartAndFullHandshake(t *testing.T) {
 
 	lastPing := client.lastPing.Load()
 	if lastPing == 0 {
-		t.Fatal("expected lastPing to be set after RPTPONG")
+		t.Fatal("expected lastPing to be set after MSTPONG")
 	}
 
 	client.Stop()
@@ -1392,16 +1391,16 @@ func TestSendRPTCLatLong(t *testing.T) {
 	client.sendRPTC()
 
 	data := <-client.connTX
-	// Latitude (8 bytes) starts at offset 42
-	lat := string(data[42:50])
-	if !strings.HasPrefix(lat, "35.0000") {
-		t.Fatalf("expected latitude starting with 35.0000, got %q", lat)
+	// Latitude (8 bytes) starts at offset 38
+	lat := string(data[38:46])
+	if lat != "+35.0000" {
+		t.Fatalf("expected latitude '+35.0000', got %q", lat)
 	}
 
-	// Longitude (9 bytes) starts at offset 50
-	lon := string(data[50:59])
-	if !strings.HasPrefix(lon, "-97.0000") {
-		t.Fatalf("expected longitude starting with -97.0000, got %q", lon)
+	// Longitude (9 bytes) starts at offset 46
+	lon := string(data[46:55])
+	if lon != "-097.0000" {
+		t.Fatalf("expected longitude '-097.0000', got %q", lon)
 	}
 }
 
@@ -1411,8 +1410,8 @@ func TestSendRPTCHeight(t *testing.T) {
 	client.sendRPTC()
 
 	data := <-client.connTX
-	// Height (3 bytes) at offset 59
-	height := string(data[59:62])
+	// Height (3 bytes) at offset 55
+	height := string(data[55:58])
 	if height != "030" {
 		t.Fatalf("expected height 030, got %q", height)
 	}
@@ -1424,8 +1423,8 @@ func TestSendRPTCLocation(t *testing.T) {
 	client.sendRPTC()
 
 	data := <-client.connTX
-	// Location (20 bytes) at offset 62
-	location := strings.TrimRight(string(data[62:82]), " ")
+	// Location (20 bytes) at offset 58
+	location := strings.TrimRight(string(data[58:78]), " ")
 	if location != "Oklahoma" {
 		t.Fatalf("expected location 'Oklahoma', got %q", location)
 	}
@@ -1437,8 +1436,8 @@ func TestSendRPTCDescription(t *testing.T) {
 	client.sendRPTC()
 
 	data := <-client.connTX
-	// Description (20 bytes) at offset 82
-	desc := strings.TrimRight(string(data[82:102]), " ")
+	// Description (19 bytes) at offset 78
+	desc := strings.TrimRight(string(data[78:97]), " ")
 	if desc != "Test Repeater" {
 		t.Fatalf("expected description 'Test Repeater', got %q", desc)
 	}
@@ -1450,8 +1449,8 @@ func TestSendRPTCURL(t *testing.T) {
 	client.sendRPTC()
 
 	data := <-client.connTX
-	// URL (124 bytes) at offset 102
-	url := strings.TrimRight(string(data[102:226]), " ")
+	// URL (124 bytes) at offset 98
+	url := strings.TrimRight(string(data[98:222]), " ")
 	if url != "https://example.com" {
 		t.Fatalf("expected URL 'https://example.com', got %q", url)
 	}
@@ -1466,15 +1465,15 @@ func TestSendRPTKTokenVerification(t *testing.T) {
 	client.sendRPTK(random)
 
 	data := <-client.connTX
-	token := string(data[12:76])
+	token := data[8:40]
 
 	s256 := sha256.New()
 	s256.Write(random)
 	s256.Write([]byte(client.cfg.Password))
-	expected := fmt.Sprintf("%x", s256.Sum(nil))
+	expected := s256.Sum(nil)
 
-	if token != expected {
-		t.Fatalf("token mismatch:\n  got:  %s\n  want: %s", token, expected)
+	if !bytes.Equal(token, expected) {
+		t.Fatalf("token mismatch:\n  got:  %x\n  want: %x", token, expected)
 	}
 }
 
