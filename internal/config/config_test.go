@@ -12,7 +12,7 @@ import (
 func validConfig() Config {
 	return Config{
 		LogLevel: LogLevelInfo,
-		HBRP: []HBRP{
+		MMDVM: []MMDVM{
 			{
 				Name:         "BM",
 				Callsign:     "N0CALL",
@@ -74,17 +74,17 @@ func TestValidateLogLevel(t *testing.T) {
 	}
 }
 
-func TestValidateHBRPCallsign(t *testing.T) {
+func TestValidateMMDVMCallsign(t *testing.T) {
 	t.Parallel()
 	c := validConfig()
-	c.HBRP[0].Callsign = ""
+	c.MMDVM[0].Callsign = ""
 	err := c.Validate()
-	if !errors.Is(err, ErrInvalidHBRPCallsign) {
-		t.Fatalf("expected %v, got %v", ErrInvalidHBRPCallsign, err)
+	if !errors.Is(err, ErrInvalidMMDVMCallsign) {
+		t.Fatalf("expected %v, got %v", ErrInvalidMMDVMCallsign, err)
 	}
 }
 
-func TestValidateHBRPColorCode(t *testing.T) {
+func TestValidateMMDVMColorCode(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
 		name    string
@@ -100,19 +100,19 @@ func TestValidateHBRPColorCode(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 			c := validConfig()
-			c.HBRP[0].ColorCode = tt.cc
+			c.MMDVM[0].ColorCode = tt.cc
 			err := c.Validate()
-			if tt.wantErr && !errors.Is(err, ErrInvalidHBRPColorCode) {
-				t.Fatalf("expected %v, got %v", ErrInvalidHBRPColorCode, err)
+			if tt.wantErr && !errors.Is(err, ErrInvalidMMDVMColorCode) {
+				t.Fatalf("expected %v, got %v", ErrInvalidMMDVMColorCode, err)
 			}
-			if !tt.wantErr && errors.Is(err, ErrInvalidHBRPColorCode) {
-				t.Fatalf("did not expect %v", ErrInvalidHBRPColorCode)
+			if !tt.wantErr && errors.Is(err, ErrInvalidMMDVMColorCode) {
+				t.Fatalf("did not expect %v", ErrInvalidMMDVMColorCode)
 			}
 		})
 	}
 }
 
-func TestValidateHBRPLatitude(t *testing.T) {
+func TestValidateMMDVMLatitude(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
 		name    string
@@ -129,19 +129,19 @@ func TestValidateHBRPLatitude(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 			c := validConfig()
-			c.HBRP[0].Latitude = tt.lat
+			c.MMDVM[0].Latitude = tt.lat
 			err := c.Validate()
-			if tt.wantErr && !errors.Is(err, ErrInvalidHBRPLatitude) {
-				t.Fatalf("expected %v, got %v", ErrInvalidHBRPLatitude, err)
+			if tt.wantErr && !errors.Is(err, ErrInvalidMMDVMLatitude) {
+				t.Fatalf("expected %v, got %v", ErrInvalidMMDVMLatitude, err)
 			}
-			if !tt.wantErr && errors.Is(err, ErrInvalidHBRPLatitude) {
-				t.Fatalf("did not expect %v", ErrInvalidHBRPLatitude)
+			if !tt.wantErr && errors.Is(err, ErrInvalidMMDVMLatitude) {
+				t.Fatalf("did not expect %v", ErrInvalidMMDVMLatitude)
 			}
 		})
 	}
 }
 
-func TestValidateHBRPLongitude(t *testing.T) {
+func TestValidateMMDVMLongitude(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
 		name    string
@@ -158,35 +158,35 @@ func TestValidateHBRPLongitude(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 			c := validConfig()
-			c.HBRP[0].Longitude = tt.lng
+			c.MMDVM[0].Longitude = tt.lng
 			err := c.Validate()
-			if tt.wantErr && !errors.Is(err, ErrInvalidHBRPLongitude) {
-				t.Fatalf("expected %v, got %v", ErrInvalidHBRPLongitude, err)
+			if tt.wantErr && !errors.Is(err, ErrInvalidMMDVMLongitude) {
+				t.Fatalf("expected %v, got %v", ErrInvalidMMDVMLongitude, err)
 			}
-			if !tt.wantErr && errors.Is(err, ErrInvalidHBRPLongitude) {
-				t.Fatalf("did not expect %v", ErrInvalidHBRPLongitude)
+			if !tt.wantErr && errors.Is(err, ErrInvalidMMDVMLongitude) {
+				t.Fatalf("did not expect %v", ErrInvalidMMDVMLongitude)
 			}
 		})
 	}
 }
 
-func TestValidateHBRPMasterServer(t *testing.T) {
+func TestValidateMMDVMMasterServer(t *testing.T) {
 	t.Parallel()
 	c := validConfig()
-	c.HBRP[0].MasterServer = ""
+	c.MMDVM[0].MasterServer = ""
 	err := c.Validate()
-	if !errors.Is(err, ErrInvalidHBRPMasterServer) {
-		t.Fatalf("expected %v, got %v", ErrInvalidHBRPMasterServer, err)
+	if !errors.Is(err, ErrInvalidMMDVMMasterServer) {
+		t.Fatalf("expected %v, got %v", ErrInvalidMMDVMMasterServer, err)
 	}
 }
 
-func TestValidateHBRPPassword(t *testing.T) {
+func TestValidateMMDVMPassword(t *testing.T) {
 	t.Parallel()
 	c := validConfig()
-	c.HBRP[0].Password = ""
+	c.MMDVM[0].Password = ""
 	err := c.Validate()
-	if !errors.Is(err, ErrInvalidHBRPPassword) {
-		t.Fatalf("expected %v, got %v", ErrInvalidHBRPPassword, err)
+	if !errors.Is(err, ErrInvalidMMDVMPassword) {
+		t.Fatalf("expected %v, got %v", ErrInvalidMMDVMPassword, err)
 	}
 }
 

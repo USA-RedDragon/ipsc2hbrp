@@ -13,15 +13,15 @@ import (
 	"github.com/USA-RedDragon/dmrgo/dmr/layer2/pdu"
 	l3elements "github.com/USA-RedDragon/dmrgo/dmr/layer3/elements"
 	"github.com/USA-RedDragon/dmrgo/dmr/vocoder"
-	hbrp "github.com/USA-RedDragon/ipsc2hbrp/internal/hbrp/proto"
+	mmdvm "github.com/USA-RedDragon/ipsc2mmdvm/internal/mmdvm/proto"
 )
 
-// IPSCTranslator converts HBRP DMRD packets into IPSC user packets.
+// IPSCTranslator converts MMDVM DMRD packets into IPSC user packets.
 // It maintains per-stream state (RTP sequence, timestamp, call control)
 // and uses the dmrgo library to FEC-decode AMBE voice data from the
 // 33-byte DMR burst into the 19-byte IPSC AMBE payload.
 //
-// It also converts IPSC user packets back into HBRP DMRD packets for the
+// It also converts IPSC user packets back into MMDVM DMRD packets for the
 // reverse direction.
 type IPSCTranslator struct {
 	mu             sync.Mutex
@@ -55,11 +55,11 @@ const (
 	ipscBurstSlot2     byte = 0x8A
 )
 
-// HBRP FrameType values (bits 2-3 of DMRD byte 15)
+// MMDVM FrameType values (bits 2-3 of DMRD byte 15)
 const (
-	hbrpFrameTypeVoice     uint = 0 // Voice data
-	hbrpFrameTypeVoiceSync uint = 1 // Voice sync (marks A burst or data sync)
-	hbrpFrameTypeDataSync  uint = 2 // Data sync (header / terminator)
+	mmdvmFrameTypeVoice     uint = 0 // Voice data
+	mmdvmFrameTypeVoiceSync uint = 1 // Voice sync (marks A burst or data sync)
+	mmdvmFrameTypeDataSync  uint = 2 // Data sync (header / terminator)
 )
 
 // RTP timestamp increment per burst (~60ms spacing in 16.16 format)
@@ -78,10 +78,10 @@ func (t *IPSCTranslator) SetPeerID(peerID uint32) {
 	t.repeaterID = peerID
 }
 
-// TranslateToIPSC converts an HBRP DMRD Packet into one or more IPSC
+// TranslateToIPSC converts an MMDVM DMRD Packet into one or more IPSC
 // user packets ready to send to IPSC peers. It returns nil if the packet
 // cannot be translated (e.g. non-voice data we don't handle yet).
-func (t *IPSCTranslator) TranslateToIPSC(pkt hbrp.Packet) [][]byte {
+func (t *IPSCTranslator) TranslateToIPSC(pkt mmdvm.Packet) [][]byte {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 
@@ -110,7 +110,7 @@ func (t *IPSCTranslator) TranslateToIPSC(pkt hbrp.Packet) [][]byte {
 	var results [][]byte
 
 	switch frameType {
-	case hbrpFrameTypeDataSync:
+	case mmdvmFrameTypeDataSync:
 		if dtypeOrVSeq > 255 {
 			slog.Debug("IPSCTranslator: invalid dtype", "dtype", dtypeOrVSeq)
 			return nil
@@ -146,7 +146,7 @@ func (t *IPSCTranslator) TranslateToIPSC(pkt hbrp.Packet) [][]byte {
 			return nil
 		}
 
-	case hbrpFrameTypeVoice, hbrpFrameTypeVoiceSync:
+	case mmdvmFrameTypeVoice, mmdvmFrameTypeVoiceSync:
 		// Voice burst — decode DMR data and extract AMBE
 		data := t.buildVoiceBurst(pkt, ss)
 		if data != nil {
@@ -171,7 +171,7 @@ func (t *IPSCTranslator) CleanupStream(streamID uint32) {
 }
 
 // buildIPSCHeader writes the common 18-byte IPSC header (bytes 0-17).
-func (t *IPSCTranslator) buildIPSCHeader(buf []byte, pkt hbrp.Packet, ss *streamState, isEnd bool, isData bool) {
+func (t *IPSCTranslator) buildIPSCHeader(buf []byte, pkt mmdvm.Packet, ss *streamState, isEnd bool, isData bool) {
 	// Byte 0: Packet type
 	if isData {
 		if pkt.GroupCall {
@@ -250,7 +250,7 @@ func (t *IPSCTranslator) buildRTPHeader(buf []byte, ss *streamState, marker bool
 
 // buildVoiceHeader builds a 54-byte IPSC voice header packet.
 // Voice headers embed the Full LC (link control) data.
-func (t *IPSCTranslator) buildVoiceHeader(pkt hbrp.Packet, ss *streamState, isFirst bool) []byte {
+func (t *IPSCTranslator) buildVoiceHeader(pkt mmdvm.Packet, ss *streamState, isFirst bool) []byte {
 	buf := make([]byte, 54)
 
 	t.buildIPSCHeader(buf, pkt, ss, false, false)
@@ -288,7 +288,7 @@ func (t *IPSCTranslator) buildVoiceHeader(pkt hbrp.Packet, ss *streamState, isFi
 }
 
 // buildVoiceTerminator builds a 54-byte IPSC voice terminator packet.
-func (t *IPSCTranslator) buildVoiceTerminator(pkt hbrp.Packet, ss *streamState) []byte {
+func (t *IPSCTranslator) buildVoiceTerminator(pkt mmdvm.Packet, ss *streamState) []byte {
 	buf := make([]byte, 54)
 
 	t.buildIPSCHeader(buf, pkt, ss, true, false)
@@ -319,7 +319,7 @@ func (t *IPSCTranslator) buildVoiceTerminator(pkt hbrp.Packet, ss *streamState) 
 
 // buildIPSCDataPacket builds a 54-byte IPSC data packet for CSBK, Data Header, etc.
 // The structure is identical to voice header/terminator but with data packet types (0x83/0x84).
-func (t *IPSCTranslator) buildIPSCDataPacket(pkt hbrp.Packet, ss *streamState, dataType elements.DataType) []byte {
+func (t *IPSCTranslator) buildIPSCDataPacket(pkt mmdvm.Packet, ss *streamState, dataType elements.DataType) []byte {
 	buf := make([]byte, 54)
 
 	t.buildIPSCHeader(buf, pkt, ss, false, true)
@@ -352,7 +352,7 @@ func (t *IPSCTranslator) buildIPSCDataPacket(pkt hbrp.Packet, ss *streamState, d
 
 // buildVoiceBurst builds an IPSC voice burst packet.
 // Burst A = 52 bytes, Bursts B-D,F = 57 bytes, Burst E = 66 bytes.
-func (t *IPSCTranslator) buildVoiceBurst(pkt hbrp.Packet, ss *streamState) []byte {
+func (t *IPSCTranslator) buildVoiceBurst(pkt mmdvm.Packet, ss *streamState) []byte {
 	// Decode the DMR burst to extract AMBE voice data
 	t.burst.DecodeFromBytes(pkt.DMRData)
 
@@ -434,7 +434,7 @@ func (t *IPSCTranslator) buildVoiceBurst(pkt hbrp.Packet, ss *streamState) []byt
 
 // extractFullLCBytes builds 12 bytes of Full Link Control data
 // from the packet fields, using the dmrgo library's encoder.
-func extractFullLCBytes(pkt hbrp.Packet) [12]byte {
+func extractFullLCBytes(pkt mmdvm.Packet) [12]byte {
 	flco := enums.FLCOUnitToUnitVoiceChannelUser
 	if pkt.Dst > math.MaxInt || pkt.Src > math.MaxInt {
 		slog.Error("Full LC address out of range")
@@ -467,7 +467,7 @@ func extractFullLCBytes(pkt hbrp.Packet) [12]byte {
 	return res
 }
 
-// reverseStreamState tracks per-call state for IPSC→HBRP translation.
+// reverseStreamState tracks per-call state for IPSC→MMDVM translation.
 type reverseStreamState struct {
 	streamID   uint32
 	seq        uint8
@@ -475,9 +475,9 @@ type reverseStreamState struct {
 	started    bool // whether we've seen a voice header
 }
 
-// TranslateToHBRP converts raw IPSC user packet data into HBRP DMRD Packets.
+// TranslateToMMDVM converts raw IPSC user packet data into MMDVM DMRD Packets.
 // Returns nil if the packet cannot be translated.
-func (t *IPSCTranslator) TranslateToHBRP(packetType byte, data []byte) []hbrp.Packet {
+func (t *IPSCTranslator) TranslateToMMDVM(packetType byte, data []byte) []mmdvm.Packet {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 
@@ -503,7 +503,7 @@ func (t *IPSCTranslator) TranslateToHBRP(packetType byte, data []byte) []hbrp.Pa
 	slot := (callInfo & 0x20) != 0 // true = TS2
 	isEnd := (callInfo & 0x40) != 0
 
-	slog.Debug("IPSCTranslator: TranslateToHBRP",
+	slog.Debug("IPSCTranslator: TranslateToMMDVM",
 		"packetType", fmt.Sprintf("0x%02X", packetType),
 		"src", src, "dst", dst, "groupCall", groupCall,
 		"slot", slot, "isEnd", isEnd)
@@ -527,13 +527,13 @@ func (t *IPSCTranslator) TranslateToHBRP(packetType byte, data []byte) []hbrp.Pa
 	// Determine what kind of IPSC burst this is from byte 30
 	burstType := data[30]
 
-	var results []hbrp.Packet
+	var results []mmdvm.Packet
 
 	switch burstType {
 	case ipscBurstVoiceHead:
 		// Voice LC Header — only process the first one (IPSC sends 3)
 		if !rss.started {
-			pkt := t.buildHBRPDataPacket(src, dst, groupCall, slot, rss,
+			pkt := t.buildMMDVMDataPacket(src, dst, groupCall, slot, rss,
 				elements.DataTypeVoiceLCHeader, data)
 			results = append(results, pkt)
 			rss.started = true
@@ -543,7 +543,7 @@ func (t *IPSCTranslator) TranslateToHBRP(packetType byte, data []byte) []hbrp.Pa
 
 	case ipscBurstVoiceTerm:
 		// Voice Terminator
-		pkt := t.buildHBRPDataPacket(src, dst, groupCall, slot, rss,
+		pkt := t.buildMMDVMDataPacket(src, dst, groupCall, slot, rss,
 			elements.DataTypeTerminatorWithLC, data)
 		results = append(results, pkt)
 		// Clean up
@@ -556,12 +556,12 @@ func (t *IPSCTranslator) TranslateToHBRP(packetType byte, data []byte) []hbrp.Pa
 			return nil
 		}
 
-		pkts := t.buildHBRPVoiceBurst(src, dst, groupCall, slot, rss, data)
+		pkts := t.buildMMDVMVoiceBurst(src, dst, groupCall, slot, rss, data)
 		results = append(results, pkts...)
 
 	case ipscBurstCSBK:
 		// CSBK or data burst — same 54-byte structure as voice header
-		pkt := t.buildHBRPDataPacket(src, dst, groupCall, slot, rss,
+		pkt := t.buildMMDVMDataPacket(src, dst, groupCall, slot, rss,
 			elements.DataTypeCSBK, data)
 		results = append(results, pkt)
 
@@ -570,7 +570,7 @@ func (t *IPSCTranslator) TranslateToHBRP(packetType byte, data []byte) []hbrp.Pa
 		// the same structure as a voice header (54 bytes with LC data).
 		// The burst type byte maps directly to the DMR data type.
 		if len(data) >= 50 && burstType <= 10 {
-			pkt := t.buildHBRPDataPacket(src, dst, groupCall, slot, rss,
+			pkt := t.buildMMDVMDataPacket(src, dst, groupCall, slot, rss,
 				elements.DataType(burstType), data)
 			results = append(results, pkt)
 		} else {
@@ -587,16 +587,16 @@ func (t *IPSCTranslator) TranslateToHBRP(packetType byte, data []byte) []hbrp.Pa
 	return results
 }
 
-// buildHBRPDataPacket builds an HBRP DMRD packet for a voice LC header, terminator,
+// buildMMDVMDataPacket builds an MMDVM DMRD packet for a voice LC header, terminator,
 // or data burst (CSBK, Data Header, etc.).
 // It constructs the 33-byte DMR burst from the IPSC payload data using BPTC encoding.
-func (t *IPSCTranslator) buildHBRPDataPacket(
+func (t *IPSCTranslator) buildMMDVMDataPacket(
 	src, dst uint, groupCall, slot bool,
 	rss *reverseStreamState,
 	dataType elements.DataType,
 	ipscData []byte,
-) hbrp.Packet {
-	pkt := hbrp.Packet{
+) mmdvm.Packet {
+	pkt := mmdvm.Packet{
 		Signature:   "DMRD",
 		Seq:         uint(rss.seq),
 		Src:         src,
@@ -604,7 +604,7 @@ func (t *IPSCTranslator) buildHBRPDataPacket(
 		Repeater:    uint(t.repeaterID),
 		Slot:        slot,
 		GroupCall:   groupCall,
-		FrameType:   hbrpFrameTypeDataSync,
+		FrameType:   mmdvmFrameTypeDataSync,
 		DTypeOrVSeq: uint(dataType),
 		StreamID:    uint(rss.streamID),
 	}
@@ -643,14 +643,14 @@ func (t *IPSCTranslator) buildHBRPDataPacket(
 	return pkt
 }
 
-// buildHBRPVoiceBurst builds HBRP DMRD packets from an IPSC voice burst.
+// buildMMDVMVoiceBurst builds MMDVM DMRD packets from an IPSC voice burst.
 // It extracts the 19-byte AMBE payload, FEC-encodes back to DMR format,
 // and reconstructs the full 33-byte DMR burst with proper sync/EMB.
-func (t *IPSCTranslator) buildHBRPVoiceBurst(
+func (t *IPSCTranslator) buildMMDVMVoiceBurst(
 	src, dst uint, groupCall, slot bool,
 	rss *reverseStreamState,
 	ipscData []byte,
-) []hbrp.Packet {
+) []mmdvm.Packet {
 	// Extract the 19-byte AMBE data from IPSC packet (bytes 33-51)
 	var ambeBytes [19]byte
 	copy(ambeBytes[:], ipscData[33:52])
@@ -708,12 +708,12 @@ func (t *IPSCTranslator) buildHBRPVoiceBurst(
 		burstIdx = 0
 	}
 
-	frameType := hbrpFrameTypeVoice
+	frameType := mmdvmFrameTypeVoice
 	if burstIdx == 0 {
-		frameType = hbrpFrameTypeVoiceSync
+		frameType = mmdvmFrameTypeVoiceSync
 	}
 
-	pkt := hbrp.Packet{
+	pkt := mmdvm.Packet{
 		Signature:   "DMRD",
 		Seq:         uint(rss.seq),
 		Src:         src,
@@ -729,7 +729,7 @@ func (t *IPSCTranslator) buildHBRPVoiceBurst(
 	rss.seq++
 	rss.burstIndex = (rss.burstIndex + 1) % 6
 
-	return []hbrp.Packet{pkt}
+	return []mmdvm.Packet{pkt}
 }
 
 // populateEmbeddedSignalling fills in the embedded signalling fields

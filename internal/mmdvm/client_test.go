@@ -1,4 +1,4 @@
-package hbrp
+package mmdvm
 
 import (
 	"crypto/sha256"
@@ -9,9 +9,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/USA-RedDragon/ipsc2hbrp/internal/config"
-	"github.com/USA-RedDragon/ipsc2hbrp/internal/hbrp/proto"
-	"github.com/USA-RedDragon/ipsc2hbrp/internal/ipsc"
+	"github.com/USA-RedDragon/ipsc2mmdvm/internal/config"
+	"github.com/USA-RedDragon/ipsc2mmdvm/internal/ipsc"
+	"github.com/USA-RedDragon/ipsc2mmdvm/internal/mmdvm/proto"
 )
 
 // Test protocol tag constants to avoid goconst warnings.
@@ -24,8 +24,8 @@ const (
 	tagDMRD    = "DMRD"
 )
 
-func testHBRPConfig() *config.HBRP {
-	return &config.HBRP{
+func testMMDVMConfig() *config.MMDVM {
+	return &config.MMDVM{
 		Name:        "TestNet",
 		ID:          311860,
 		Callsign:    "N0CALL",
@@ -43,17 +43,17 @@ func testHBRPConfig() *config.HBRP {
 	}
 }
 
-// newTestClient creates an HBRPClient with buffered channels
+// newTestClient creates an MMDVMClient with buffered channels
 // so packet-building methods and handler can be tested without a real connection.
-func newTestClient(t *testing.T) *HBRPClient {
+func newTestClient(t *testing.T) *MMDVMClient {
 	t.Helper()
-	cfg := testHBRPConfig()
+	cfg := testMMDVMConfig()
 	translator, err := ipsc.NewIPSCTranslator()
 	if err != nil {
 		t.Fatalf("NewIPSCTranslator: %v", err)
 	}
-	client := &HBRPClient{
-		hbrpCfg:    cfg,
+	client := &MMDVMClient{
+		cfg:        cfg,
 		connTX:     make(chan []byte, 16),
 		connRX:     make(chan []byte, 16),
 		tx_chan:    make(chan proto.Packet, 16),
@@ -86,14 +86,14 @@ func TestStateConstants(t *testing.T) {
 	}
 }
 
-func TestNewHBRPClient(t *testing.T) {
+func TestNewMMDVMClient(t *testing.T) {
 	t.Parallel()
-	cfg := testHBRPConfig()
-	client := NewHBRPClient(cfg)
+	cfg := testMMDVMConfig()
+	client := NewMMDVMClient(cfg)
 	if client == nil {
 		t.Fatal("expected non-nil client")
 	}
-	if client.hbrpCfg != cfg {
+	if client.cfg != cfg {
 		t.Fatal("expected config to be set")
 	}
 	if client.started.Load() {
@@ -124,7 +124,7 @@ func TestSendLoginPacket(t *testing.T) {
 		t.Fatalf("expected RPTL prefix, got %q", string(data[:4]))
 	}
 	// Should contain the hex ID
-	hexID := fmt.Sprintf("%08x", client.hbrpCfg.ID)
+	hexID := fmt.Sprintf("%08x", client.cfg.ID)
 	if string(data[4:12]) != hexID {
 		t.Fatalf("expected hex ID %q, got %q", hexID, string(data[4:12]))
 	}
@@ -143,7 +143,7 @@ func TestSendRPTCLPacket(t *testing.T) {
 	if string(data[:5]) != tagRPTCL {
 		t.Fatalf("expected RPTCL prefix, got %q", string(data[:5]))
 	}
-	hexID := fmt.Sprintf("%08x", client.hbrpCfg.ID)
+	hexID := fmt.Sprintf("%08x", client.cfg.ID)
 	if string(data[5:13]) != hexID {
 		t.Fatalf("expected hex ID %q, got %q", hexID, string(data[5:13]))
 	}
@@ -170,31 +170,31 @@ func TestSendRPTCPacket(t *testing.T) {
 	}
 
 	// Check hex radio ID (8 bytes)
-	hexID := fmt.Sprintf("%08x", client.hbrpCfg.ID)
+	hexID := fmt.Sprintf("%08x", client.cfg.ID)
 	if string(data[12:20]) != hexID {
 		t.Fatalf("expected hex ID %q at offset 12, got %q", hexID, string(data[12:20]))
 	}
 
 	// Check RX freq (9 bytes)
-	expectedRX := fmt.Sprintf("%09d", client.hbrpCfg.RXFreq)
+	expectedRX := fmt.Sprintf("%09d", client.cfg.RXFreq)
 	if string(data[20:29]) != expectedRX {
 		t.Fatalf("expected RX freq %q, got %q", expectedRX, string(data[20:29]))
 	}
 
 	// Check TX freq (9 bytes)
-	expectedTX := fmt.Sprintf("%09d", client.hbrpCfg.TXFreq)
+	expectedTX := fmt.Sprintf("%09d", client.cfg.TXFreq)
 	if string(data[29:38]) != expectedTX {
 		t.Fatalf("expected TX freq %q, got %q", expectedTX, string(data[29:38]))
 	}
 
 	// Check TX power (2 bytes)
-	expectedPower := fmt.Sprintf("%02d", client.hbrpCfg.TXPower)
+	expectedPower := fmt.Sprintf("%02d", client.cfg.TXPower)
 	if string(data[38:40]) != expectedPower {
 		t.Fatalf("expected TX power %q, got %q", expectedPower, string(data[38:40]))
 	}
 
 	// Check color code (2 bytes)
-	expectedCC := fmt.Sprintf("%02d", client.hbrpCfg.ColorCode)
+	expectedCC := fmt.Sprintf("%02d", client.cfg.ColorCode)
 	if string(data[40:42]) != expectedCC {
 		t.Fatalf("expected color code %q, got %q", expectedCC, string(data[40:42]))
 	}
@@ -213,7 +213,7 @@ func TestSendRPTKPacket(t *testing.T) {
 	}
 
 	// Hex ID at offset 4
-	hexID := fmt.Sprintf("%08x", client.hbrpCfg.ID)
+	hexID := fmt.Sprintf("%08x", client.cfg.ID)
 	if string(data[4:12]) != hexID {
 		t.Fatalf("expected hex ID %q, got %q", hexID, string(data[4:12]))
 	}
@@ -227,7 +227,7 @@ func TestSendRPTKPacket(t *testing.T) {
 	// Verify the token is the correct sha256(random + password)
 	s256 := sha256.New()
 	s256.Write(random)
-	s256.Write([]byte(client.hbrpCfg.Password))
+	s256.Write([]byte(client.cfg.Password))
 	expectedToken := fmt.Sprintf("%x", s256.Sum(nil))
 	if token != expectedToken {
 		t.Fatalf("expected token %q, got %q", expectedToken, token)
@@ -248,7 +248,7 @@ func TestSendPingPacket(t *testing.T) {
 	if string(data[:7]) != tagMSTPING {
 		t.Fatalf("expected MSTPING prefix, got %q", string(data[:7]))
 	}
-	hexID := fmt.Sprintf("%08x", client.hbrpCfg.ID)
+	hexID := fmt.Sprintf("%08x", client.cfg.ID)
 	if string(data[7:15]) != hexID {
 		t.Fatalf("expected hex ID %q, got %q", hexID, string(data[7:15]))
 	}
@@ -312,11 +312,11 @@ func TestPacketTypeMstack(t *testing.T) {
 func TestSendLoginHexIDFormat(t *testing.T) {
 	t.Parallel()
 	// Test with ID=1 to verify zero-padding
-	cfg := testHBRPConfig()
+	cfg := testMMDVMConfig()
 	cfg.ID = 1
-	client := &HBRPClient{
-		hbrpCfg: cfg,
-		connTX:  make(chan []byte, 16),
+	client := &MMDVMClient{
+		cfg:    cfg,
+		connTX: make(chan []byte, 16),
 	}
 	client.sendLogin()
 
@@ -348,9 +348,9 @@ func TestSendRPTKDifferentRandomProducesDifferentToken(t *testing.T) {
 
 // udpPair creates a connected pair: a "server" UDPConn that the client talks to,
 // and returns the server conn plus the client (already connected).
-func udpPair(t *testing.T) (*net.UDPConn, *HBRPClient) {
+func udpPair(t *testing.T) (*net.UDPConn, *MMDVMClient) {
 	t.Helper()
-	// Start a UDP listener (acts as fake HBRP master)
+	// Start a UDP listener (acts as fake MMDVM master)
 	serverConn, err := net.ListenUDP("udp", &net.UDPAddr{IP: net.IPv4(127, 0, 0, 1), Port: 0})
 	if err != nil {
 		t.Fatalf("server listen: %v", err)
@@ -360,10 +360,10 @@ func udpPair(t *testing.T) (*net.UDPConn, *HBRPClient) {
 		t.Fatal("expected *net.UDPAddr from LocalAddr")
 	}
 
-	cfg := testHBRPConfig()
+	cfg := testMMDVMConfig()
 	cfg.MasterServer = fmt.Sprintf("127.0.0.1:%d", srvAddr.Port)
 
-	client := NewHBRPClient(cfg)
+	client := NewMMDVMClient(cfg)
 	if err := client.connect(); err != nil {
 		serverConn.Close()
 		t.Fatalf("connect: %v", err)
@@ -404,9 +404,9 @@ func TestConnectSuccess(t *testing.T) {
 
 func TestConnectBadAddress(t *testing.T) {
 	t.Parallel()
-	cfg := testHBRPConfig()
+	cfg := testMMDVMConfig()
 	cfg.MasterServer = "this-is-not-a-valid-address:::::999999"
-	client := NewHBRPClient(cfg)
+	client := NewMMDVMClient(cfg)
 
 	err := client.connect()
 	if err == nil {
@@ -670,13 +670,13 @@ func TestHandlerSentRPTCAccepted(t *testing.T) {
 	}
 	defer serverConn.Close()
 
-	cfg := testHBRPConfig()
+	cfg := testMMDVMConfig()
 	srvAddr, ok := serverConn.LocalAddr().(*net.UDPAddr)
 	if !ok {
 		t.Fatal("expected *net.UDPAddr from LocalAddr")
 	}
 	cfg.MasterServer = fmt.Sprintf("127.0.0.1:%d", srvAddr.Port)
-	client.hbrpCfg = cfg
+	client.cfg = cfg
 
 	// Give it a real conn for ping
 	if err := client.connect(); err != nil {
@@ -1089,7 +1089,7 @@ func TestHandleIPSCBurstTranslatesAndSends(t *testing.T) {
 	client := newTestClient(t)
 	client.started.Store(true)
 	if client.translator != nil {
-		client.translator.SetPeerID(client.hbrpCfg.ID)
+		client.translator.SetPeerID(client.cfg.ID)
 	}
 
 	// Build an IPSC voice header packet
@@ -1123,7 +1123,7 @@ func TestHandleIPSCBurstTranslatesAndSends(t *testing.T) {
 	addr := &net.UDPAddr{IP: net.IPv4(10, 0, 0, 1), Port: 1234}
 	client.HandleIPSCBurst(0x80, data, addr)
 
-	// Should produce at least 1 HBRP packet on tx_chan
+	// Should produce at least 1 MMDVM packet on tx_chan
 	select {
 	case pkt := <-client.tx_chan:
 		if pkt.Signature != tagDMRD {
@@ -1142,7 +1142,7 @@ func TestHandleIPSCBurstStopsOnDone(t *testing.T) {
 	client := newTestClient(t)
 	client.started.Store(true)
 	if client.translator != nil {
-		client.translator.SetPeerID(client.hbrpCfg.ID)
+		client.translator.SetPeerID(client.cfg.ID)
 	}
 
 	// Close done channel before handling burst
@@ -1272,7 +1272,7 @@ func TestSendRPTCLDirect(t *testing.T) {
 	if string(got[:5]) != tagRPTCL {
 		t.Fatalf("expected RPTCL, got %q", string(got[:min(5, len(got))]))
 	}
-	hexID := fmt.Sprintf("%08x", client.hbrpCfg.ID)
+	hexID := fmt.Sprintf("%08x", client.cfg.ID)
 	if string(got[5:13]) != hexID {
 		t.Fatalf("expected hex ID %q, got %q", hexID, string(got[5:13]))
 	}
@@ -1292,10 +1292,10 @@ func TestStartAndFullHandshake(t *testing.T) {
 		t.Fatal("expected *net.UDPAddr from LocalAddr")
 	}
 
-	cfg := testHBRPConfig()
+	cfg := testMMDVMConfig()
 	cfg.MasterServer = fmt.Sprintf("127.0.0.1:%d", srvAddr.Port)
 
-	client := NewHBRPClient(cfg)
+	client := NewMMDVMClient(cfg)
 	client.keepAlive = 200 * time.Millisecond
 	client.timeout = 5 * time.Second
 
@@ -1470,7 +1470,7 @@ func TestSendRPTKTokenVerification(t *testing.T) {
 
 	s256 := sha256.New()
 	s256.Write(random)
-	s256.Write([]byte(client.hbrpCfg.Password))
+	s256.Write([]byte(client.cfg.Password))
 	expected := fmt.Sprintf("%x", s256.Sum(nil))
 
 	if token != expected {
@@ -1516,7 +1516,7 @@ func TestHandleIPSCBurstMultiple(t *testing.T) {
 	client := newTestClient(t)
 	client.started.Store(true)
 	if client.translator != nil {
-		client.translator.SetPeerID(client.hbrpCfg.ID)
+		client.translator.SetPeerID(client.cfg.ID)
 	}
 
 	// Send multiple voice headers with different call controls

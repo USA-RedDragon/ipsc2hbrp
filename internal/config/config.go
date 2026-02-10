@@ -18,7 +18,7 @@ const (
 
 type Config struct {
 	LogLevel LogLevel `name:"log-level" description:"Logging level for the application. One of debug, info, warn, or error" default:"info"`
-	HBRP     []HBRP   `name:"hbrp" description:"Configuration for HBRP clients (multiple DMR masters)"`
+	MMDVM    []MMDVM  `name:"mmdvm" description:"Configuration for MMDVM clients (multiple DMR masters)"`
 	IPSC     IPSC     `name:"ipsc" description:"Configuration for the IPSC server"`
 }
 
@@ -36,29 +36,30 @@ type IPSCAuth struct {
 	Key     string `name:"key" description:"Authentication key for IPSC clients. Required if auth is enabled"`
 }
 
-type HBRP struct {
-	Name     string `name:"name" description:"Name for this HBRP network (used in logging)"`
-	Callsign string `name:"callsign" description:"Callsign to use for the HBRP connection"`
-	ID       uint32 `name:"radio-id" description:"Radio ID for the HBRP connection"`
+type MMDVM struct {
+	Name     string `name:"name" description:"Name for this MMDVM network (used in logging)"`
+	Callsign string `name:"callsign" description:"Callsign to use for the MMDVM connection"`
+	ID       uint32 `name:"radio-id" description:"Radio ID for the MMDVM connection"`
 	// RXFreq is in Hz
-	RXFreq uint `name:"rx-freq" description:"Receive frequency in Hz for the HBRP connection"`
+	RXFreq uint `name:"rx-freq" description:"Receive frequency in Hz for the MMDVM connection"`
 	// TXFreq is in Hz
-	TXFreq uint `name:"tx-freq" description:"Transmit frequency in Hz for the HBRP connection"`
+	TXFreq uint `name:"tx-freq" description:"Transmit frequency in Hz for the MMDVM connection"`
 	// TXPower is in dBm
-	TXPower uint8 `name:"tx-power" description:"Transmit power in dBm for the HBRP connection"`
+	TXPower uint8 `name:"tx-power" description:"Transmit power in dBm for the MMDVM connection"`
 	// ColorCode is the DMR color code
-	ColorCode uint8 `name:"color-code" description:"DMR color code for the HBRP connection"`
+	ColorCode uint8 `name:"color-code" description:"DMR color code for the MMDVM connection"`
 	// Latitude with north as positive [-90,+90]
-	Latitude float64 `name:"latitude" description:"Latitude with north as positive [-90,+90] for the HBRP connection"`
+	Latitude float64 `name:"latitude" description:"Latitude with north as positive [-90,+90] for the MMDVM connection"`
 	// Longitude with east as positive [-180+,180]
-	Longitude float64 `name:"longitude" description:"Longitude with east as positive [-180+,180] for the HBRP connection"`
+	Longitude float64 `name:"longitude" description:"Longitude with east as positive [-180+,180] for the MMDVM connection"`
 	// Height in meters
-	Height       uint16 `name:"height" description:"Height in meters for the HBRP connection"`
-	Location     string `name:"location" description:"Location for the HBRP connection"`
-	Description  string `name:"description" description:"Description for the HBRP connection"`
-	URL          string `name:"url" description:"URL for the HBRP connection"`
-	MasterServer string `name:"master-server" description:"Master server for the HBRP connection"`
-	Password     string `name:"password" description:"Password for the HBRP connection"`
+	Height       uint16 `name:"height" description:"Height in meters for the MMDVM connection"`
+	Location     string `name:"location" description:"Location for the MMDVM connection"`
+	Description  string `name:"description" description:"Description for the MMDVM connection"`
+	URL          string `name:"url" description:"URL for the MMDVM connection"`
+	Slots        byte   `name:"slots" description:"Active timeslots bitmask (1=TS1, 2=TS2, 3=both)" default:"3"`
+	MasterServer string `name:"master-server" description:"Master server for the MMDVM connection"`
+	Password     string `name:"password" description:"Password for the MMDVM connection"`
 
 	// Rewrite rules for routing DMR data to/from this network.
 	TGRewrites   []TGRewriteConfig   `name:"tg-rewrite" description:"Talkgroup rewrite rules"`
@@ -108,22 +109,22 @@ type SrcRewriteConfig struct {
 }
 
 var (
-	ErrInvalidLogLevel         = errors.New("invalid log level provided")
-	ErrNoHBRPNetworks          = errors.New("at least one HBRP network must be configured")
-	ErrInvalidHBRPName         = errors.New("invalid HBRP network name provided")
-	ErrDuplicateHBRPName       = errors.New("duplicate HBRP network name provided")
-	ErrInvalidHBRPCallsign     = errors.New("invalid HBRP callsign provided")
-	ErrInvalidHBRPColorCode    = errors.New("invalid HBRP color code provided")
-	ErrInvalidHBRPLongitude    = errors.New("invalid HBRP longitude provided")
-	ErrInvalidHBRPLatitude     = errors.New("invalid HBRP latitude provided")
-	ErrInvalidHBRPMasterServer = errors.New("invalid HBRP master server provided")
-	ErrInvalidHBRPPassword     = errors.New("invalid HBRP password provided")
-	ErrInvalidRewriteSlot      = errors.New("invalid rewrite slot (must be 1 or 2)")
-	ErrInvalidRewriteRange     = errors.New("invalid rewrite range (must be >= 1)")
-	ErrInvalidIPSCInterface    = errors.New("invalid IPSC interface provided")
-	ErrInvalidIPSCIP           = errors.New("invalid IPSC IP address provided")
-	ErrInvalidIPSCSubnetMask   = errors.New("invalid IPSC subnet mask provided")
-	ErrInvalidIPSCAuthKey      = errors.New("invalid IPSC authentication key provided")
+	ErrInvalidLogLevel          = errors.New("invalid log level provided")
+	ErrNoMMDVMNetworks          = errors.New("at least one MMDVM network must be configured")
+	ErrInvalidMMDVMName         = errors.New("invalid MMDVM network name provided")
+	ErrDuplicateMMDVMName       = errors.New("duplicate MMDVM network name provided")
+	ErrInvalidMMDVMCallsign     = errors.New("invalid MMDVM callsign provided")
+	ErrInvalidMMDVMColorCode    = errors.New("invalid MMDVM color code provided")
+	ErrInvalidMMDVMLongitude    = errors.New("invalid MMDVM longitude provided")
+	ErrInvalidMMDVMLatitude     = errors.New("invalid MMDVM latitude provided")
+	ErrInvalidMMDVMMasterServer = errors.New("invalid MMDVM master server provided")
+	ErrInvalidMMDVMPassword     = errors.New("invalid MMDVM password provided")
+	ErrInvalidRewriteSlot       = errors.New("invalid rewrite slot (must be 1 or 2)")
+	ErrInvalidRewriteRange      = errors.New("invalid rewrite range (must be >= 1)")
+	ErrInvalidIPSCInterface     = errors.New("invalid IPSC interface provided")
+	ErrInvalidIPSCIP            = errors.New("invalid IPSC IP address provided")
+	ErrInvalidIPSCSubnetMask    = errors.New("invalid IPSC subnet mask provided")
+	ErrInvalidIPSCAuthKey       = errors.New("invalid IPSC authentication key provided")
 )
 
 func (c Config) Validate() error {
@@ -133,46 +134,46 @@ func (c Config) Validate() error {
 		return ErrInvalidLogLevel
 	}
 
-	if len(c.HBRP) == 0 {
-		return ErrNoHBRPNetworks
+	if len(c.MMDVM) == 0 {
+		return ErrNoMMDVMNetworks
 	}
 
-	names := make(map[string]struct{}, len(c.HBRP))
-	for i := range c.HBRP {
-		h := &c.HBRP[i]
+	names := make(map[string]struct{}, len(c.MMDVM))
+	for i := range c.MMDVM {
+		h := &c.MMDVM[i]
 
 		// Default name to "Network N" if empty
 		if h.Name == "" {
-			return ErrInvalidHBRPName
+			return ErrInvalidMMDVMName
 		}
 
 		if _, ok := names[h.Name]; ok {
-			return ErrDuplicateHBRPName
+			return ErrDuplicateMMDVMName
 		}
 		names[h.Name] = struct{}{}
 
 		if h.Callsign == "" {
-			return ErrInvalidHBRPCallsign
+			return ErrInvalidMMDVMCallsign
 		}
 
 		if h.ColorCode > 15 {
-			return ErrInvalidHBRPColorCode
+			return ErrInvalidMMDVMColorCode
 		}
 
 		if h.Longitude < -180 || h.Longitude > 180 {
-			return ErrInvalidHBRPLongitude
+			return ErrInvalidMMDVMLongitude
 		}
 
 		if h.Latitude < -90 || h.Latitude > 90 {
-			return ErrInvalidHBRPLatitude
+			return ErrInvalidMMDVMLatitude
 		}
 
 		if h.MasterServer == "" {
-			return ErrInvalidHBRPMasterServer
+			return ErrInvalidMMDVMMasterServer
 		}
 
 		if h.Password == "" {
-			return ErrInvalidHBRPPassword
+			return ErrInvalidMMDVMPassword
 		}
 
 		if err := validateRewrites(h); err != nil {
@@ -214,7 +215,7 @@ func validateSlot(slot uint) bool {
 	return slot == 1 || slot == 2
 }
 
-func validateRewrites(h *HBRP) error {
+func validateRewrites(h *MMDVM) error {
 	for _, r := range h.TGRewrites {
 		if !validateSlot(r.FromSlot) || !validateSlot(r.ToSlot) {
 			return ErrInvalidRewriteSlot

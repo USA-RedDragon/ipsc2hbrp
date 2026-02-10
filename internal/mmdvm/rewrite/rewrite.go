@@ -1,5 +1,5 @@
 // Package rewrite provides DMRGateway-compatible rewrite rules for routing
-// DMR packets between multiple HBRP masters. The rewrite types mirror those
+// DMR packets between multiple MMDVM masters. The rewrite types mirror those
 // found in g4klx/DMRGateway: TGRewrite, PCRewrite, TypeRewrite, and SrcRewrite.
 //
 // Each rule inspects the FLCO (Full Link Control Opcode), slot, and
@@ -12,7 +12,7 @@ import (
 	"fmt"
 	"log/slog"
 
-	"github.com/USA-RedDragon/ipsc2hbrp/internal/hbrp/proto"
+	"github.com/USA-RedDragon/ipsc2mmdvm/internal/mmdvm/proto"
 )
 
 // Result indicates the outcome of applying a rewrite rule.

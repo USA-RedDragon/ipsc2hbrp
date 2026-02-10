@@ -11,12 +11,12 @@ import (
 	"testing"
 	"time"
 
-	"github.com/USA-RedDragon/ipsc2hbrp/internal/config"
+	"github.com/USA-RedDragon/ipsc2mmdvm/internal/config"
 )
 
 func testConfig(authEnabled bool, authKey string) *config.Config {
 	return &config.Config{
-		HBRP: []config.HBRP{{
+		MMDVM: []config.MMDVM{{
 			ID: 311860,
 		}},
 		IPSC: config.IPSC{
@@ -199,8 +199,8 @@ func TestNewIPSCServerNoAuth(t *testing.T) {
 	if s.authKey != nil {
 		t.Fatal("expected nil auth key when auth disabled")
 	}
-	if s.localID != cfg.HBRP[0].ID {
-		t.Fatalf("expected localID %d, got %d", cfg.HBRP[0].ID, s.localID)
+	if s.localID != cfg.MMDVM[0].ID {
+		t.Fatalf("expected localID %d, got %d", cfg.MMDVM[0].ID, s.localID)
 	}
 }
 
@@ -270,8 +270,8 @@ func TestBuildMasterRegisterReply(t *testing.T) {
 	}
 
 	id := binary.BigEndian.Uint32(reply[1:5])
-	if id != cfg.HBRP[0].ID {
-		t.Fatalf("expected ID %d, got %d", cfg.HBRP[0].ID, id)
+	if id != cfg.MMDVM[0].ID {
+		t.Fatalf("expected ID %d, got %d", cfg.MMDVM[0].ID, id)
 	}
 }
 

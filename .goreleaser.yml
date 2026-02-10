@@ -1,16 +1,16 @@
 ---
-project_name: ipsc2hbrp
+project_name: ipsc2mmdvm
 
 release:
   extra_files:
     - glob: ./LICENSE
   github:
     owner: USA-RedDragon
-    name: ipsc2hbrp
+    name: ipsc2mmdvm
 
 builds:
   - main: .
-    binary: ipsc2hbrp
+    binary: ipsc2mmdvm
     goos:
       - linux
     goarch:

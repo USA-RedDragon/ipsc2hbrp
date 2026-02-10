@@ -14,7 +14,7 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/USA-RedDragon/ipsc2hbrp/internal/config"
+	"github.com/USA-RedDragon/ipsc2mmdvm/internal/config"
 	"github.com/vishvananda/netlink"
 )
 
@@ -90,10 +90,10 @@ func NewIPSCServer(cfg *config.Config) *IPSCServer {
 		}
 	}
 
-	// Use the first HBRP network's ID as the local peer identity.
+	// Use the first MMDVM network's ID as the local peer identity.
 	var localID uint32
-	if len(cfg.HBRP) > 0 {
-		localID = cfg.HBRP[0].ID
+	if len(cfg.MMDVM) > 0 {
+		localID = cfg.MMDVM[0].ID
 	}
 
 	return &IPSCServer{

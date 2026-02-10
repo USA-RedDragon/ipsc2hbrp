@@ -8,7 +8,7 @@ import (
 	"github.com/USA-RedDragon/dmrgo/dmr/layer2"
 	"github.com/USA-RedDragon/dmrgo/dmr/layer2/elements"
 	"github.com/USA-RedDragon/dmrgo/dmr/layer2/pdu"
-	hbrp "github.com/USA-RedDragon/ipsc2hbrp/internal/hbrp/proto"
+	mmdvm "github.com/USA-RedDragon/ipsc2mmdvm/internal/mmdvm/proto"
 )
 
 func newTestTranslator(t *testing.T) *IPSCTranslator {
@@ -54,7 +54,7 @@ func TestCleanupStream(t *testing.T) {
 	tr := newTestTranslator(t)
 
 	// Create some stream state by translating a voice header
-	pkt := makeTestHBRPPacket(true, true, hbrpFrameTypeDataSync, 1) // VoiceLCHeader=1
+	pkt := makeTestMMDVMPacket(true, true, mmdvmFrameTypeDataSync, 1) // VoiceLCHeader=1
 	tr.TranslateToIPSC(pkt)
 
 	streamID := uint32(pkt.StreamID) //nolint:gosec // test value is within uint32 range
@@ -78,8 +78,8 @@ func TestCleanupStream(t *testing.T) {
 	}
 }
 
-func makeTestHBRPPacket(groupCall, slot bool, frameType, dtypeOrVSeq uint) hbrp.Packet {
-	return hbrp.Packet{
+func makeTestMMDVMPacket(groupCall, slot bool, frameType, dtypeOrVSeq uint) mmdvm.Packet {
+	return mmdvm.Packet{
 		Signature:   "DMRD",
 		Seq:         0,
 		Src:         100,
@@ -97,7 +97,7 @@ func makeTestHBRPPacket(groupCall, slot bool, frameType, dtypeOrVSeq uint) hbrp.
 func TestTranslateToIPSCNilOnUnknownFrameType(t *testing.T) {
 	t.Parallel()
 	tr := newTestTranslator(t)
-	pkt := makeTestHBRPPacket(true, false, 3, 0) // frameType=3 is unknown
+	pkt := makeTestMMDVMPacket(true, false, 3, 0) // frameType=3 is unknown
 	result := tr.TranslateToIPSC(pkt)
 	if result != nil {
 		t.Fatalf("expected nil for unknown frame type, got %d packets", len(result))
@@ -108,7 +108,7 @@ func TestTranslateToIPSCVoiceHeaderProduces3Packets(t *testing.T) {
 	t.Parallel()
 	tr := newTestTranslator(t)
 	// DataTypeVoiceLCHeader = 1
-	pkt := makeTestHBRPPacket(true, false, hbrpFrameTypeDataSync, 1)
+	pkt := makeTestMMDVMPacket(true, false, mmdvmFrameTypeDataSync, 1)
 	result := tr.TranslateToIPSC(pkt)
 	if len(result) != 3 {
 		t.Fatalf("expected 3 voice header packets, got %d", len(result))
@@ -119,11 +119,11 @@ func TestTranslateToIPSCVoiceTerminator(t *testing.T) {
 	t.Parallel()
 	tr := newTestTranslator(t)
 	// First send a header to establish stream
-	header := makeTestHBRPPacket(true, false, hbrpFrameTypeDataSync, 1)
+	header := makeTestMMDVMPacket(true, false, mmdvmFrameTypeDataSync, 1)
 	tr.TranslateToIPSC(header)
 
 	// DataTypeTerminatorWithLC = 2
-	term := makeTestHBRPPacket(true, false, hbrpFrameTypeDataSync, 2)
+	term := makeTestMMDVMPacket(true, false, mmdvmFrameTypeDataSync, 2)
 	term.StreamID = header.StreamID
 	result := tr.TranslateToIPSC(term)
 	if len(result) != 1 {
@@ -136,7 +136,7 @@ func TestTranslateToIPSCGroupCallFlag(t *testing.T) {
 	tr := newTestTranslator(t)
 
 	// Group call
-	pkt := makeTestHBRPPacket(true, false, hbrpFrameTypeDataSync, 1)
+	pkt := makeTestMMDVMPacket(true, false, mmdvmFrameTypeDataSync, 1)
 	result := tr.TranslateToIPSC(pkt)
 	if len(result) < 1 {
 		t.Fatal("expected at least 1 packet")
@@ -147,7 +147,7 @@ func TestTranslateToIPSCGroupCallFlag(t *testing.T) {
 
 	// Private call
 	tr2 := newTestTranslator(t)
-	pkt2 := makeTestHBRPPacket(false, false, hbrpFrameTypeDataSync, 1)
+	pkt2 := makeTestMMDVMPacket(false, false, mmdvmFrameTypeDataSync, 1)
 	pkt2.StreamID = 0x5678
 	result2 := tr2.TranslateToIPSC(pkt2)
 	if len(result2) < 1 {
@@ -161,7 +161,7 @@ func TestTranslateToIPSCGroupCallFlag(t *testing.T) {
 func TestTranslateToIPSCPeerIDInHeader(t *testing.T) {
 	t.Parallel()
 	tr := newTestTranslator(t)
-	pkt := makeTestHBRPPacket(true, false, hbrpFrameTypeDataSync, 1)
+	pkt := makeTestMMDVMPacket(true, false, mmdvmFrameTypeDataSync, 1)
 	result := tr.TranslateToIPSC(pkt)
 	if len(result) < 1 {
 		t.Fatal("expected at least 1 packet")
@@ -177,7 +177,7 @@ func TestTranslateToIPSCSlotFlag(t *testing.T) {
 
 	// TS1 (Slot=false)
 	tr := newTestTranslator(t)
-	pkt := makeTestHBRPPacket(true, false, hbrpFrameTypeDataSync, 1)
+	pkt := makeTestMMDVMPacket(true, false, mmdvmFrameTypeDataSync, 1)
 	result := tr.TranslateToIPSC(pkt)
 	if len(result) < 1 {
 		t.Fatal("expected packets")
@@ -189,7 +189,7 @@ func TestTranslateToIPSCSlotFlag(t *testing.T) {
 
 	// TS2 (Slot=true)
 	tr2 := newTestTranslator(t)
-	pkt2 := makeTestHBRPPacket(true, true, hbrpFrameTypeDataSync, 1)
+	pkt2 := makeTestMMDVMPacket(true, true, mmdvmFrameTypeDataSync, 1)
 	pkt2.StreamID = 0x9999
 	result2 := tr2.TranslateToIPSC(pkt2)
 	if len(result2) < 1 {
@@ -204,7 +204,7 @@ func TestTranslateToIPSCSlotFlag(t *testing.T) {
 func TestTranslateToIPSCSrcDstInHeader(t *testing.T) {
 	t.Parallel()
 	tr := newTestTranslator(t)
-	pkt := makeTestHBRPPacket(true, false, hbrpFrameTypeDataSync, 1)
+	pkt := makeTestMMDVMPacket(true, false, mmdvmFrameTypeDataSync, 1)
 	pkt.Src = 0x123456
 	pkt.Dst = 0xABCDEF
 	result := tr.TranslateToIPSC(pkt)
@@ -221,19 +221,19 @@ func TestTranslateToIPSCSrcDstInHeader(t *testing.T) {
 	}
 }
 
-func TestTranslateToHBRPTooShort(t *testing.T) {
+func TestTranslateToMMDVMTooShort(t *testing.T) {
 	t.Parallel()
 	tr := newTestTranslator(t)
-	result := tr.TranslateToHBRP(0x80, make([]byte, 10))
+	result := tr.TranslateToMMDVM(0x80, make([]byte, 10))
 	if result != nil {
 		t.Fatal("expected nil for too-short IPSC packet")
 	}
 }
 
-func TestTranslateToHBRPUnsupportedType(t *testing.T) {
+func TestTranslateToMMDVMUnsupportedType(t *testing.T) {
 	t.Parallel()
 	tr := newTestTranslator(t)
-	result := tr.TranslateToHBRP(0x99, make([]byte, 54))
+	result := tr.TranslateToMMDVM(0x99, make([]byte, 54))
 	if result != nil {
 		t.Fatal("expected nil for unsupported packet type")
 	}
@@ -284,11 +284,11 @@ func makeTestIPSCPacket(packetType byte, burstType byte, groupCall, slot bool) [
 	return buf
 }
 
-func TestTranslateToHBRPVoiceHeader(t *testing.T) {
+func TestTranslateToMMDVMVoiceHeader(t *testing.T) {
 	t.Parallel()
 	tr := newTestTranslator(t)
 	data := makeTestIPSCPacket(0x80, ipscBurstVoiceHead, true, false)
-	result := tr.TranslateToHBRP(0x80, data)
+	result := tr.TranslateToMMDVM(0x80, data)
 	if len(result) != 1 {
 		t.Fatalf("expected 1 packet for voice header, got %d", len(result))
 	}
@@ -296,8 +296,8 @@ func TestTranslateToHBRPVoiceHeader(t *testing.T) {
 	if pkt.Signature != "DMRD" {
 		t.Fatalf("expected DMRD signature, got %q", pkt.Signature)
 	}
-	if pkt.FrameType != hbrpFrameTypeDataSync {
-		t.Fatalf("expected frame type %d (data sync), got %d", hbrpFrameTypeDataSync, pkt.FrameType)
+	if pkt.FrameType != mmdvmFrameTypeDataSync {
+		t.Fatalf("expected frame type %d (data sync), got %d", mmdvmFrameTypeDataSync, pkt.FrameType)
 	}
 	if pkt.Src != 100 {
 		t.Fatalf("expected src 100, got %d", pkt.Src)
@@ -307,35 +307,35 @@ func TestTranslateToHBRPVoiceHeader(t *testing.T) {
 	}
 }
 
-func TestTranslateToHBRPDuplicateHeaderSkipped(t *testing.T) {
+func TestTranslateToMMDVMDuplicateHeaderSkipped(t *testing.T) {
 	t.Parallel()
 	tr := newTestTranslator(t)
 	data := makeTestIPSCPacket(0x80, ipscBurstVoiceHead, true, false)
 
 	// First header should produce a packet
-	result := tr.TranslateToHBRP(0x80, data)
+	result := tr.TranslateToMMDVM(0x80, data)
 	if len(result) != 1 {
 		t.Fatalf("expected 1 packet for first header, got %d", len(result))
 	}
 
 	// Second header with same call control should be skipped
-	result = tr.TranslateToHBRP(0x80, data)
+	result = tr.TranslateToMMDVM(0x80, data)
 	if len(result) != 0 {
 		t.Fatalf("expected 0 packets for duplicate header, got %d", len(result))
 	}
 }
 
-func TestTranslateToHBRPVoiceTerminator(t *testing.T) {
+func TestTranslateToMMDVMVoiceTerminator(t *testing.T) {
 	t.Parallel()
 	tr := newTestTranslator(t)
 
 	// Send header first to establish stream
 	header := makeTestIPSCPacket(0x80, ipscBurstVoiceHead, true, false)
-	tr.TranslateToHBRP(0x80, header)
+	tr.TranslateToMMDVM(0x80, header)
 
 	// Send terminator
 	term := makeTestIPSCPacket(0x80, ipscBurstVoiceTerm, true, false)
-	result := tr.TranslateToHBRP(0x80, term)
+	result := tr.TranslateToMMDVM(0x80, term)
 	if len(result) != 1 {
 		t.Fatalf("expected 1 packet for terminator, got %d", len(result))
 	}
@@ -344,11 +344,11 @@ func TestTranslateToHBRPVoiceTerminator(t *testing.T) {
 	}
 }
 
-func TestTranslateToHBRPPrivateCall(t *testing.T) {
+func TestTranslateToMMDVMPrivateCall(t *testing.T) {
 	t.Parallel()
 	tr := newTestTranslator(t)
 	data := makeTestIPSCPacket(0x81, ipscBurstVoiceHead, false, false)
-	result := tr.TranslateToHBRP(0x81, data)
+	result := tr.TranslateToMMDVM(0x81, data)
 	if len(result) != 1 {
 		t.Fatalf("expected 1 packet, got %d", len(result))
 	}
@@ -357,13 +357,13 @@ func TestTranslateToHBRPPrivateCall(t *testing.T) {
 	}
 }
 
-func TestTranslateToHBRPSlotTS2(t *testing.T) {
+func TestTranslateToMMDVMSlotTS2(t *testing.T) {
 	t.Parallel()
 	tr := newTestTranslator(t)
 	data := makeTestIPSCPacket(0x80, ipscBurstVoiceHead, true, true)
 	// Use a different call control to avoid collision
 	binary.BigEndian.PutUint32(data[13:17], 0xBBBB)
-	result := tr.TranslateToHBRP(0x80, data)
+	result := tr.TranslateToMMDVM(0x80, data)
 	if len(result) != 1 {
 		t.Fatalf("expected 1 packet, got %d", len(result))
 	}
@@ -372,20 +372,20 @@ func TestTranslateToHBRPSlotTS2(t *testing.T) {
 	}
 }
 
-func TestTranslateToHBRPEndFlagCleansUp(t *testing.T) {
+func TestTranslateToMMDVMEndFlagCleansUp(t *testing.T) {
 	t.Parallel()
 	tr := newTestTranslator(t)
 
 	// Send header
 	header := makeTestIPSCPacket(0x80, ipscBurstVoiceHead, true, false)
 	binary.BigEndian.PutUint32(header[13:17], 0xCCCC)
-	tr.TranslateToHBRP(0x80, header)
+	tr.TranslateToMMDVM(0x80, header)
 
 	// Send another packet with end flag set (but not a terminator burst type)
 	endPkt := makeTestIPSCPacket(0x80, ipscBurstVoiceHead, true, false)
 	binary.BigEndian.PutUint32(endPkt[13:17], 0xCCCC)
 	endPkt[17] |= 0x40 // set end flag
-	tr.TranslateToHBRP(0x80, endPkt)
+	tr.TranslateToMMDVM(0x80, endPkt)
 
 	// Verify the stream was cleaned up
 	tr.mu.Lock()
@@ -396,12 +396,12 @@ func TestTranslateToHBRPEndFlagCleansUp(t *testing.T) {
 	}
 }
 
-func TestTranslateToHBRPCSBK(t *testing.T) {
+func TestTranslateToMMDVMCSBK(t *testing.T) {
 	t.Parallel()
 	tr := newTestTranslator(t)
 	data := makeTestIPSCPacket(0x83, ipscBurstCSBK, true, false)
 	binary.BigEndian.PutUint32(data[13:17], 0xDDDD)
-	result := tr.TranslateToHBRP(0x83, data)
+	result := tr.TranslateToMMDVM(0x83, data)
 	if len(result) != 1 {
 		t.Fatalf("expected 1 packet for CSBK, got %d", len(result))
 	}
@@ -412,7 +412,7 @@ func TestTranslateToHBRPCSBK(t *testing.T) {
 
 func TestExtractFullLCBytesGroupCall(t *testing.T) {
 	t.Parallel()
-	pkt := hbrp.Packet{
+	pkt := mmdvm.Packet{
 		GroupCall: true,
 		Src:       100,
 		Dst:       200,
@@ -426,7 +426,7 @@ func TestExtractFullLCBytesGroupCall(t *testing.T) {
 
 func TestExtractFullLCBytesPrivateCall(t *testing.T) {
 	t.Parallel()
-	pkt := hbrp.Packet{
+	pkt := mmdvm.Packet{
 		GroupCall: false,
 		Src:       100,
 		Dst:       200,
@@ -441,7 +441,7 @@ func TestExtractFullLCBytesPrivateCall(t *testing.T) {
 func TestBuildIPSCHeaderDataPacket(t *testing.T) {
 	t.Parallel()
 	tr := newTestTranslator(t)
-	pkt := makeTestHBRPPacket(true, false, hbrpFrameTypeDataSync, 3) // CSBK
+	pkt := makeTestMMDVMPacket(true, false, mmdvmFrameTypeDataSync, 3) // CSBK
 	result := tr.TranslateToIPSC(pkt)
 	if len(result) < 1 {
 		t.Fatal("expected at least 1 data packet")
@@ -456,11 +456,11 @@ func TestBuildIPSCHeaderEndFlag(t *testing.T) {
 	t.Parallel()
 	tr := newTestTranslator(t)
 	// First send a header
-	header := makeTestHBRPPacket(true, false, hbrpFrameTypeDataSync, 1)
+	header := makeTestMMDVMPacket(true, false, mmdvmFrameTypeDataSync, 1)
 	tr.TranslateToIPSC(header)
 
 	// Then send terminator (end flag should be set)
-	term := makeTestHBRPPacket(true, false, hbrpFrameTypeDataSync, 2)
+	term := makeTestMMDVMPacket(true, false, mmdvmFrameTypeDataSync, 2)
 	term.StreamID = header.StreamID
 	result := tr.TranslateToIPSC(term)
 	if len(result) != 1 {
@@ -475,7 +475,7 @@ func TestBuildIPSCHeaderEndFlag(t *testing.T) {
 func TestBuildRTPHeader(t *testing.T) {
 	t.Parallel()
 	tr := newTestTranslator(t)
-	pkt := makeTestHBRPPacket(true, false, hbrpFrameTypeDataSync, 1)
+	pkt := makeTestMMDVMPacket(true, false, mmdvmFrameTypeDataSync, 1)
 	result := tr.TranslateToIPSC(pkt)
 	if len(result) < 1 {
 		t.Fatal("expected at least 1 packet")
@@ -489,7 +489,7 @@ func TestBuildRTPHeader(t *testing.T) {
 func TestBuildRTPHeaderNoMarker(t *testing.T) {
 	t.Parallel()
 	tr := newTestTranslator(t)
-	pkt := makeTestHBRPPacket(true, false, hbrpFrameTypeDataSync, 1)
+	pkt := makeTestMMDVMPacket(true, false, mmdvmFrameTypeDataSync, 1)
 	result := tr.TranslateToIPSC(pkt)
 	if len(result) < 3 {
 		t.Fatal("expected 3 header packets")
@@ -506,9 +506,9 @@ func TestMultipleStreamsConcurrent(t *testing.T) {
 	tr := newTestTranslator(t)
 
 	// Start two separate streams
-	pkt1 := makeTestHBRPPacket(true, false, hbrpFrameTypeDataSync, 1)
+	pkt1 := makeTestMMDVMPacket(true, false, mmdvmFrameTypeDataSync, 1)
 	pkt1.StreamID = 0xAAAA
-	pkt2 := makeTestHBRPPacket(true, true, hbrpFrameTypeDataSync, 1)
+	pkt2 := makeTestMMDVMPacket(true, true, mmdvmFrameTypeDataSync, 1)
 	pkt2.StreamID = 0xBBBB
 
 	result1 := tr.TranslateToIPSC(pkt1)
@@ -531,7 +531,7 @@ func TestMultipleStreamsConcurrent(t *testing.T) {
 
 // makeVoiceDMRData builds a 33-byte DMR voice burst (with sync pattern) that
 // round-trips through layer2.Burst Decode/Encode. This allows buildVoiceBurst
-// and buildHBRPVoiceBurst to work on realistic data.
+// and buildMMDVMVoiceBurst to work on realistic data.
 func makeVoiceDMRData(syncBurst bool) [33]byte {
 	var burst layer2.Burst
 	// Set up minimal voice frames (silence-ish)
@@ -559,11 +559,11 @@ func TestBuildVoiceBurstA(t *testing.T) {
 	tr := newTestTranslator(t)
 
 	// Send a header first to establish stream
-	header := makeTestHBRPPacket(true, false, hbrpFrameTypeDataSync, 1)
+	header := makeTestMMDVMPacket(true, false, mmdvmFrameTypeDataSync, 1)
 	tr.TranslateToIPSC(header)
 
 	// Build a voice sync burst (burst A, index 0)
-	pkt := makeTestHBRPPacket(true, false, hbrpFrameTypeVoiceSync, 0)
+	pkt := makeTestMMDVMPacket(true, false, mmdvmFrameTypeVoiceSync, 0)
 	pkt.StreamID = header.StreamID
 	pkt.DMRData = makeVoiceDMRData(true)
 
@@ -599,17 +599,17 @@ func TestBuildVoiceBurstBCDF(t *testing.T) {
 	tr := newTestTranslator(t)
 
 	// Send a header to establish stream state
-	header := makeTestHBRPPacket(true, true, hbrpFrameTypeDataSync, 1)
+	header := makeTestMMDVMPacket(true, true, mmdvmFrameTypeDataSync, 1)
 	tr.TranslateToIPSC(header)
 
 	// Send burst A to advance burstIndex to 1
-	burstA := makeTestHBRPPacket(true, true, hbrpFrameTypeVoiceSync, 0)
+	burstA := makeTestMMDVMPacket(true, true, mmdvmFrameTypeVoiceSync, 0)
 	burstA.StreamID = header.StreamID
 	burstA.DMRData = makeVoiceDMRData(true)
 	tr.TranslateToIPSC(burstA)
 
 	// Now send burst B (burstIndex=1) — should produce 57-byte packet
-	burstB := makeTestHBRPPacket(true, true, hbrpFrameTypeVoice, 1)
+	burstB := makeTestMMDVMPacket(true, true, mmdvmFrameTypeVoice, 1)
 	burstB.StreamID = header.StreamID
 	burstB.DMRData = makeVoiceDMRData(false)
 
@@ -645,23 +645,23 @@ func TestBuildVoiceBurstE(t *testing.T) {
 	tr := newTestTranslator(t)
 
 	// Establish stream
-	header := makeTestHBRPPacket(true, false, hbrpFrameTypeDataSync, 1)
+	header := makeTestMMDVMPacket(true, false, mmdvmFrameTypeDataSync, 1)
 	tr.TranslateToIPSC(header)
 
 	// Send bursts A-D to advance burstIndex to 4
 	for i := 0; i < 4; i++ {
-		ft := hbrpFrameTypeVoice
+		ft := mmdvmFrameTypeVoice
 		if i == 0 {
-			ft = hbrpFrameTypeVoiceSync
+			ft = mmdvmFrameTypeVoiceSync
 		}
-		pkt := makeTestHBRPPacket(true, false, ft, uint(i)) //nolint:gosec // G115: i is in [0,3]
+		pkt := makeTestMMDVMPacket(true, false, ft, uint(i)) //nolint:gosec // G115: i is in [0,3]
 		pkt.StreamID = header.StreamID
 		pkt.DMRData = makeVoiceDMRData(i == 0)
 		tr.TranslateToIPSC(pkt)
 	}
 
 	// Now send burst E (burstIndex=4) — should produce 66-byte packet
-	burstE := makeTestHBRPPacket(true, false, hbrpFrameTypeVoice, 4)
+	burstE := makeTestMMDVMPacket(true, false, mmdvmFrameTypeVoice, 4)
 	burstE.StreamID = header.StreamID
 	burstE.DMRData = makeVoiceDMRData(false)
 	burstE.Src = 0x112233
@@ -710,13 +710,13 @@ func TestBuildVoiceBurstSkipsDataBurst(t *testing.T) {
 	tr := newTestTranslator(t)
 
 	// Establish stream
-	header := makeTestHBRPPacket(true, false, hbrpFrameTypeDataSync, 1)
+	header := makeTestMMDVMPacket(true, false, mmdvmFrameTypeDataSync, 1)
 	tr.TranslateToIPSC(header)
 
 	// Build a DMR data burst (not voice) — the burst decodes as IsData=true
 	dataDMR := layer2.BuildLCDataBurst([12]byte{}, elements.DataTypeVoiceLCHeader, 0)
 
-	pkt := makeTestHBRPPacket(true, false, hbrpFrameTypeVoice, 0)
+	pkt := makeTestMMDVMPacket(true, false, mmdvmFrameTypeVoice, 0)
 	pkt.StreamID = header.StreamID
 	pkt.DMRData = dataDMR
 
@@ -731,23 +731,23 @@ func TestBuildVoiceBurstWrapsAfterF(t *testing.T) {
 	tr := newTestTranslator(t)
 
 	// Establish stream
-	header := makeTestHBRPPacket(true, false, hbrpFrameTypeDataSync, 1)
+	header := makeTestMMDVMPacket(true, false, mmdvmFrameTypeDataSync, 1)
 	tr.TranslateToIPSC(header)
 
 	// Send 6 bursts (A-F) to complete one superframe
 	for i := 0; i < 6; i++ {
-		ft := hbrpFrameTypeVoice
+		ft := mmdvmFrameTypeVoice
 		if i == 0 {
-			ft = hbrpFrameTypeVoiceSync
+			ft = mmdvmFrameTypeVoiceSync
 		}
-		pkt := makeTestHBRPPacket(true, false, ft, uint(i)) //nolint:gosec // G115: i is in [0,5]
+		pkt := makeTestMMDVMPacket(true, false, ft, uint(i)) //nolint:gosec // G115: i is in [0,5]
 		pkt.StreamID = header.StreamID
 		pkt.DMRData = makeVoiceDMRData(i == 0)
 		tr.TranslateToIPSC(pkt)
 	}
 
 	// The 7th burst should wrap to index 0 (burst A again) → 52 bytes
-	pkt := makeTestHBRPPacket(true, false, hbrpFrameTypeVoiceSync, 0)
+	pkt := makeTestMMDVMPacket(true, false, mmdvmFrameTypeVoiceSync, 0)
 	pkt.StreamID = header.StreamID
 	pkt.DMRData = makeVoiceDMRData(true)
 
@@ -760,13 +760,13 @@ func TestBuildVoiceBurstWrapsAfterF(t *testing.T) {
 	}
 }
 
-func TestBuildHBRPVoiceBurstFromSlot1(t *testing.T) {
+func TestBuildMMDVMVoiceBurstFromSlot1(t *testing.T) {
 	t.Parallel()
 	tr := newTestTranslator(t)
 
 	// Send header to establish reverse stream
 	header := makeTestIPSCPacket(0x80, ipscBurstVoiceHead, true, false)
-	tr.TranslateToHBRP(0x80, header)
+	tr.TranslateToMMDVM(0x80, header)
 
 	// Build an IPSC voice burst (slot1 = burst A, 52 bytes)
 	burstData := make([]byte, 52)
@@ -776,9 +776,9 @@ func TestBuildHBRPVoiceBurstFromSlot1(t *testing.T) {
 	burstData[32] = 0x40
 	// AMBE data at bytes 33-51 (19 bytes, zeros = silence)
 
-	result := tr.TranslateToHBRP(0x80, burstData)
+	result := tr.TranslateToMMDVM(0x80, burstData)
 	if len(result) != 1 {
-		t.Fatalf("expected 1 HBRP packet for voice burst, got %d", len(result))
+		t.Fatalf("expected 1 MMDVM packet for voice burst, got %d", len(result))
 	}
 
 	pkt := result[0]
@@ -798,22 +798,22 @@ func TestBuildHBRPVoiceBurstFromSlot1(t *testing.T) {
 		t.Fatal("expected Slot=false for TS1")
 	}
 	// First voice burst (burstIndex=0) should be voice sync
-	if pkt.FrameType != hbrpFrameTypeVoiceSync {
-		t.Fatalf("expected frame type %d (voice sync), got %d", hbrpFrameTypeVoiceSync, pkt.FrameType)
+	if pkt.FrameType != mmdvmFrameTypeVoiceSync {
+		t.Fatalf("expected frame type %d (voice sync), got %d", mmdvmFrameTypeVoiceSync, pkt.FrameType)
 	}
 	if pkt.DTypeOrVSeq != 0 {
 		t.Fatalf("expected DTypeOrVSeq 0 (burst A), got %d", pkt.DTypeOrVSeq)
 	}
 }
 
-func TestBuildHBRPVoiceBurstSequencing(t *testing.T) {
+func TestBuildMMDVMVoiceBurstSequencing(t *testing.T) {
 	t.Parallel()
 	tr := newTestTranslator(t)
 
 	// Establish reverse stream with a header
 	header := makeTestIPSCPacket(0x80, ipscBurstVoiceHead, true, false)
 	binary.BigEndian.PutUint32(header[13:17], 0xEEEE)
-	tr.TranslateToHBRP(0x80, header)
+	tr.TranslateToMMDVM(0x80, header)
 
 	// Send 3 voice bursts and verify sequencing
 	for i := 0; i < 3; i++ {
@@ -824,7 +824,7 @@ func TestBuildHBRPVoiceBurstSequencing(t *testing.T) {
 		burstData[31] = 0x14
 		burstData[32] = 0x40
 
-		result := tr.TranslateToHBRP(0x80, burstData)
+		result := tr.TranslateToMMDVM(0x80, burstData)
 		if len(result) != 1 {
 			t.Fatalf("burst %d: expected 1 packet, got %d", i, len(result))
 		}
@@ -835,11 +835,11 @@ func TestBuildHBRPVoiceBurstSequencing(t *testing.T) {
 		}
 		// Burst 0 = voice sync, rest = voice
 		if i == 0 {
-			if pkt.FrameType != hbrpFrameTypeVoiceSync {
+			if pkt.FrameType != mmdvmFrameTypeVoiceSync {
 				t.Fatalf("burst 0: expected voice sync frame type, got %d", pkt.FrameType)
 			}
 		} else {
-			if pkt.FrameType != hbrpFrameTypeVoice {
+			if pkt.FrameType != mmdvmFrameTypeVoice {
 				t.Fatalf("burst %d: expected voice frame type, got %d", i, pkt.FrameType)
 			}
 		}
@@ -849,13 +849,13 @@ func TestBuildHBRPVoiceBurstSequencing(t *testing.T) {
 	}
 }
 
-func TestBuildHBRPVoiceBurstWrapsAt6(t *testing.T) {
+func TestBuildMMDVMVoiceBurstWrapsAt6(t *testing.T) {
 	t.Parallel()
 	tr := newTestTranslator(t)
 
 	header := makeTestIPSCPacket(0x80, ipscBurstVoiceHead, true, false)
 	binary.BigEndian.PutUint32(header[13:17], 0xFFFF)
-	tr.TranslateToHBRP(0x80, header)
+	tr.TranslateToMMDVM(0x80, header)
 
 	// Send 7 voice bursts — the 7th should wrap to burstIndex 0 (voice sync again)
 	for i := 0; i < 7; i++ {
@@ -866,7 +866,7 @@ func TestBuildHBRPVoiceBurstWrapsAt6(t *testing.T) {
 		burstData[31] = 0x14
 		burstData[32] = 0x40
 
-		result := tr.TranslateToHBRP(0x80, burstData)
+		result := tr.TranslateToMMDVM(0x80, burstData)
 		if len(result) != 1 {
 			t.Fatalf("burst %d: expected 1 packet, got %d", i, len(result))
 		}
@@ -880,13 +880,13 @@ func TestBuildHBRPVoiceBurstWrapsAt6(t *testing.T) {
 	}
 }
 
-func TestBuildHBRPVoiceBurstSlot2(t *testing.T) {
+func TestBuildMMDVMVoiceBurstSlot2(t *testing.T) {
 	t.Parallel()
 	tr := newTestTranslator(t)
 
 	header := makeTestIPSCPacket(0x80, ipscBurstVoiceHead, true, true)
 	binary.BigEndian.PutUint32(header[13:17], 0x1111)
-	tr.TranslateToHBRP(0x80, header)
+	tr.TranslateToMMDVM(0x80, header)
 
 	burstData := make([]byte, 52)
 	copy(burstData[:18], header[:18])
@@ -895,7 +895,7 @@ func TestBuildHBRPVoiceBurstSlot2(t *testing.T) {
 	burstData[31] = 0x14
 	burstData[32] = 0x40
 
-	result := tr.TranslateToHBRP(0x80, burstData)
+	result := tr.TranslateToMMDVM(0x80, burstData)
 	if len(result) != 1 {
 		t.Fatalf("expected 1 packet, got %d", len(result))
 	}
@@ -904,14 +904,14 @@ func TestBuildHBRPVoiceBurstSlot2(t *testing.T) {
 	}
 }
 
-func TestBuildHBRPVoiceBurstTooShort(t *testing.T) {
+func TestBuildMMDVMVoiceBurstTooShort(t *testing.T) {
 	t.Parallel()
 	tr := newTestTranslator(t)
 
 	// Establish reverse stream
 	header := makeTestIPSCPacket(0x80, ipscBurstVoiceHead, true, false)
 	binary.BigEndian.PutUint32(header[13:17], 0x2222)
-	tr.TranslateToHBRP(0x80, header)
+	tr.TranslateToMMDVM(0x80, header)
 
 	// Send a voice burst packet that is too short (< 52 bytes)
 	burstData := make([]byte, 40)
@@ -919,19 +919,19 @@ func TestBuildHBRPVoiceBurstTooShort(t *testing.T) {
 	binary.BigEndian.PutUint32(burstData[13:17], 0x2222)
 	burstData[30] = ipscBurstSlot1
 
-	result := tr.TranslateToHBRP(0x80, burstData)
+	result := tr.TranslateToMMDVM(0x80, burstData)
 	if result != nil {
 		t.Fatalf("expected nil for too-short voice burst, got %d packets", len(result))
 	}
 }
 
-func TestBuildHBRPVoiceBurstPrivateCall(t *testing.T) {
+func TestBuildMMDVMVoiceBurstPrivateCall(t *testing.T) {
 	t.Parallel()
 	tr := newTestTranslator(t)
 
 	header := makeTestIPSCPacket(0x81, ipscBurstVoiceHead, false, false)
 	binary.BigEndian.PutUint32(header[13:17], 0x3333)
-	tr.TranslateToHBRP(0x81, header)
+	tr.TranslateToMMDVM(0x81, header)
 
 	burstData := make([]byte, 52)
 	copy(burstData[:18], header[:18])
@@ -940,7 +940,7 @@ func TestBuildHBRPVoiceBurstPrivateCall(t *testing.T) {
 	burstData[31] = 0x14
 	burstData[32] = 0x40
 
-	result := tr.TranslateToHBRP(0x81, burstData)
+	result := tr.TranslateToMMDVM(0x81, burstData)
 	if len(result) != 1 {
 		t.Fatalf("expected 1 packet, got %d", len(result))
 	}

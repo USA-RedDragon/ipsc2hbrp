@@ -1,21 +1,21 @@
-# ipsc2hbrp
+# ipsc2mmdvm
 
-[![Release](https://github.com/USA-RedDragon/ipsc2hbrp/actions/workflows/release.yaml/badge.svg)](https://github.com/USA-RedDragon/ipsc2hbrp/actions/workflows/release.yaml) [![go.mod version](https://img.shields.io/github/go-mod/go-version/USA-RedDragon/ipsc2hbrp.svg)](https://github.com/USA-RedDragon/ipsc2hbrp) [![GoReportCard](https://goreportcard.com/badge/github.com/USA-RedDragon/ipsc2hbrp)](https://goreportcard.com/report/github.com/USA-RedDragon/ipsc2hbrp) [![License](https://badgen.net/github/license/USA-RedDragon/ipsc2hbrp)](https://github.com/USA-RedDragon/ipsc2hbrp/blob/main/LICENSE) [![Release](https://img.shields.io/github/release/USA-RedDragon/ipsc2hbrp.svg)](https://github.com/USA-RedDragon/ipsc2hbrp/releases/) [![codecov](https://codecov.io/gh/USA-RedDragon/ipsc2hbrp/graph/badge.svg?token=NHCyRaZGG9)](https://codecov.io/gh/USA-RedDragon/ipsc2hbrp)
+[![Release](https://github.com/USA-RedDragon/ipsc2mmdvm/actions/workflows/release.yaml/badge.svg)](https://github.com/USA-RedDragon/ipsc2mmdvm/actions/workflows/release.yaml) [![go.mod version](https://img.shields.io/github/go-mod/go-version/USA-RedDragon/ipsc2mmdvm.svg)](https://github.com/USA-RedDragon/ipsc2mmdvm) [![GoReportCard](https://goreportcard.com/badge/github.com/USA-RedDragon/ipsc2mmdvm)](https://goreportcard.com/report/github.com/USA-RedDragon/ipsc2mmdvm) [![License](https://badgen.net/github/license/USA-RedDragon/ipsc2mmdvm)](https://github.com/USA-RedDragon/ipsc2mmdvm/blob/main/LICENSE) [![Release](https://img.shields.io/github/release/USA-RedDragon/ipsc2mmdvm.svg)](https://github.com/USA-RedDragon/ipsc2mmdvm/releases/) [![codecov](https://codecov.io/gh/USA-RedDragon/ipsc2mmdvm/graph/badge.svg?token=NHCyRaZGG9)](https://codecov.io/gh/USA-RedDragon/ipsc2mmdvm)
 
-**Connect your Motorola IPSC repeater to HBRP DMR Masters.**
+**Connect your Motorola IPSC repeater to MMDVM DMR Masters.**
 
-ipsc2hbrp is a protocol bridge that translates between Motorola's IP Site Connect (IPSC) protocol and the Homebrew Repeater Protocol (HBRP). This lets your IPSC-only repeater talk to one or more DMR masters such as BrandMeister and TGIF simultaneously, with [DMRGateway](https://github.com/g4klx/DMRGateway)-compatible rewrite rules for routing talkgroups between networks.
+ipsc2mmdvm is a protocol bridge that translates between Motorola's IP Site Connect (IPSC) protocol and the MMDVM Protocol. This lets your IPSC-only repeater talk to one or more DMR masters such as BrandMeister and TGIF simultaneously, with [DMRGateway](https://github.com/g4klx/DMRGateway)-compatible rewrite rules for routing talkgroups between networks.
 
 ## How It Works
 
 ```mermaid
 flowchart LR
     A["Motorola<br>DMR Repeater"] <-->|"Ethernet<br>IPSC protocol<br>(direct cable)"| B
-    B["ipsc2hbrp<br>(Raspberry Pi <br>or Linux box)"] <-->|"Internet<br>HBRP protocol"| C[DMR Master 1<br>e.g. BrandMeister]
-    B <-->|"Internet<br>HBRP protocol"| D[DMR Master 2<br>e.g. TGIF]
+    B["ipsc2mmdvm<br>(Raspberry Pi <br>or Linux box)"] <-->|"Internet<br>MMDVM protocol"| C[DMR Master 1<br>e.g. BrandMeister]
+    B <-->|"Internet<br>MMDVM protocol"| D[DMR Master 2<br>e.g. TGIF]
 ```
 
-Your repeater connects directly via Ethernet cable to the box running ipsc2hbrp. The software acts as an IPSC master to the repeater and forwards voice and data traffic to and from one or more DMR masters over the internet. DMRGateway-style rewrite rules let you route specific talkgroups to specific masters.
+Your repeater connects directly via Ethernet cable to the box running ipsc2mmdvm. The software acts as an IPSC master to the repeater and forwards voice and data traffic to and from one or more DMR masters over the internet. DMRGateway-style rewrite rules let you route specific talkgroups to specific masters.
 
 ## Requirements
 
@@ -27,13 +27,13 @@ Your repeater connects directly via Ethernet cable to the box running ipsc2hbrp.
 
 ## Setup
 
-### 1. Download ipsc2hbrp
+### 1. Download ipsc2mmdvm
 
-Download the latest release tarball for your platform from the [GitHub Releases](https://github.com/USA-RedDragon/ipsc2hbrp/releases/latest) page. For a Raspberry Pi, grab the [`linux_arm64`](https://github.com/USA-RedDragon/ipsc2hbrp/releases/latest) build, for desktop Linux use [`linux_amd64`](https://github.com/USA-RedDragon/ipsc2hbrp/releases/latest). Extract it and move the binary to your PATH:
+Download the latest release tarball for your platform from the [GitHub Releases](https://github.com/USA-RedDragon/ipsc2mmdvm/releases/latest) page. For a Raspberry Pi, grab the [`linux_arm64`](https://github.com/USA-RedDragon/ipsc2mmdvm/releases/latest) build, for desktop Linux use [`linux_amd64`](https://github.com/USA-RedDragon/ipsc2mmdvm/releases/latest). Extract it and move the binary to your PATH:
 
 ```bash
-tar xzf ipsc2hbrp_*_linux_arm64.tar.gz
-sudo mv ipsc2hbrp /usr/local/bin/ipsc2hbrp
+tar xzf ipsc2mmdvm_*_linux_arm64.tar.gz
+sudo mv ipsc2mmdvm /usr/local/bin/ipsc2mmdvm
 ```
 
 ### 2. Create the Config File
@@ -41,9 +41,9 @@ sudo mv ipsc2hbrp /usr/local/bin/ipsc2hbrp
 Download the example config, edit it, then move it into place:
 
 ```bash
-wget https://raw.githubusercontent.com/USA-RedDragon/ipsc2hbrp/main/config.example.yaml -O ipsc2hbrp.yaml
-nano ipsc2hbrp.yaml
-sudo mv ipsc2hbrp.yaml /etc/ipsc2hbrp.yaml
+wget https://raw.githubusercontent.com/USA-RedDragon/ipsc2mmdvm/main/config.example.yaml -O ipsc2mmdvm.yaml
+nano ipsc2mmdvm.yaml
+sudo mv ipsc2mmdvm.yaml /etc/ipsc2mmdvm.yaml
 ```
 
 Here is the full example config with comments:
@@ -60,9 +60,9 @@ ipsc:
     enabled: false        # Set to true if you configured an auth key in CPS
     key: ""               # Hex string, up to 40 characters (must match CPS)
 
-hbrp:
+mmdvm:
   - name: "BrandMeister"  # Friendly name for logging
-    master-server: "3104.master.brandmeister.network:62030"  # BrandMeister master (see below)
+    master-server: "3104.master.brandmeister.network:62031"  # BrandMeister master (see below)
     password: "passw0rd"  # Your BrandMeister hotspot password
 
     callsign: N0CALL      # Your callsign
@@ -111,13 +111,13 @@ hbrp:
 **Config notes:**
 
 - **`ipsc.interface`** - The name of the network interface physically connected to your repeater. On a Raspberry Pi this is typically `eth0`. Run `ip link` to see your interface names.
-- **`ipsc.ip`** - The IP address ipsc2hbrp assigns to that interface. This becomes the "Master IP" in your repeater's CPS config, and also the gateway for the repeater. Pick any private IP (e.g. `10.10.250.1`).
+- **`ipsc.ip`** - The IP address ipsc2mmdvm assigns to that interface. This becomes the "Master IP" in your repeater's CPS config, and also the gateway for the repeater. Pick any private IP (e.g. `10.10.250.1`).
 - **`ipsc.port`** - The UDP port to listen on. The default `50000` works fine. Must match the "Master UDP Port" in CPS.
-- **`hbrp`** - A YAML array of DMR master connections. Each entry is a separate master. You can connect to as many masters as you like.
-- **`hbrp[].name`** - A friendly name for this network, used in log messages (e.g. `"BrandMeister"`, `"TGIF"`).
-- **`hbrp[].master-server`** - The master's host and port. For BrandMeister, find the master covering your region in the [BrandMeister Master Server List](https://brandmeister.network/?page=masters). The format is `host:port` (e.g. `3104.master.brandmeister.network:62030`).
-- **`hbrp[].password`** - Your hotspot security password, such as the one set in your BrandMeister self-care dashboard.
-- **`hbrp[].radio-id`** - Your repeater's DMR ID, registered at [radioid.net](https://radioid.net/).
+- **`mmdvm`** - A YAML array of DMR master connections. Each entry is a separate master. You can connect to as many masters as you like.
+- **`mmdvm[].name`** - A friendly name for this network, used in log messages (e.g. `"BrandMeister"`, `"TGIF"`).
+- **`mmdvm[].master-server`** - The master's host and port. For BrandMeister, find the master covering your region in the [BrandMeister Master Server List](https://brandmeister.network/?page=masters). The format is `host:port` (e.g. `3104.master.brandmeister.network:62030`).
+- **`mmdvm[].password`** - Your hotspot security password, such as the one set in your BrandMeister self-care dashboard.
+- **`mmdvm[].radio-id`** - Your repeater's DMR ID, registered at [radioid.net](https://radioid.net/).
 
 ### 3. Configure the Motorola Repeater (CPS)
 
@@ -150,39 +150,39 @@ Write the codeplug to the repeater.
 1. **Plug an Ethernet cable** directly from your repeater's Ethernet port to the Ethernet port on your Raspberry Pi (or spare NIC on your Linux box).
 2. Make sure the Pi/Linux box has **internet access** through a different interface (Wi-Fi on a Pi, or a second NIC).
 
-> **Note:** The Ethernet interface connected to the repeater is dedicated to ipsc2hbrp. Do not use it for anything else, ipsc2hbrp will assign it an IP address automatically.
+> **Note:** The Ethernet interface connected to the repeater is dedicated to ipsc2mmdvm. Do not use it for anything else, ipsc2mmdvm will assign it an IP address automatically.
 
-### 5. Run ipsc2hbrp
+### 5. Run ipsc2mmdvm
 
-ipsc2hbrp requires root privileges to configure the network interface. Run it from the directory containing your config file, or copy the config to the working directory:
+ipsc2mmdvm requires root privileges to configure the network interface. Run it from the directory containing your config file, or copy the config to the working directory:
 
 ```bash
-sudo ipsc2hbrp
+sudo ipsc2mmdvm
 ```
 
-By default, ipsc2hbrp looks for `config.yaml` in the current directory. You can also place the config at a known location and run from that directory:
+By default, ipsc2mmdvm looks for `config.yaml` in the current directory. You can also place the config at a known location and run from that directory:
 
 ```bash
-cd /etc && sudo ipsc2hbrp
+cd /etc && sudo ipsc2mmdvm
 ```
 
 On startup you should see the repeater register and traffic will begin flowing to BrandMeister.
 
 ### Running as a systemd Service
 
-To have ipsc2hbrp start automatically on boot, create a systemd service file:
+To have ipsc2mmdvm start automatically on boot, create a systemd service file:
 
 ```bash
-sudo tee /etc/systemd/system/ipsc2hbrp.service << 'EOF'
+sudo tee /etc/systemd/system/ipsc2mmdvm.service << 'EOF'
 [Unit]
-Description=ipsc2hbrp - IPSC to HBRP Bridge
+Description=ipsc2mmdvm - IPSC to MMDVM Bridge
 After=network-online.target
 Wants=network-online.target
 
 [Service]
 Type=simple
 WorkingDirectory=/etc
-ExecStart=/usr/local/bin/ipsc2hbrp -config /etc/ipsc2hbrp.yaml
+ExecStart=/usr/local/bin/ipsc2mmdvm -config /etc/ipsc2mmdvm.yaml
 Restart=on-failure
 RestartSec=5
 
@@ -195,20 +195,20 @@ Then enable and start it:
 
 ```bash
 sudo systemctl daemon-reload
-sudo systemctl enable ipsc2hbrp
-sudo systemctl start ipsc2hbrp
+sudo systemctl enable ipsc2mmdvm
+sudo systemctl start ipsc2mmdvm
 ```
 
 Check status and logs:
 
 ```bash
-sudo systemctl status ipsc2hbrp
-sudo journalctl -u ipsc2hbrp -f
+sudo systemctl status ipsc2mmdvm
+sudo journalctl -u ipsc2mmdvm -f
 ```
 
 ## Configuration Reference
 
-All settings can also be set via **environment variables** using `_` as a separator (e.g. `IPSC_PORT=50000`, `HBRP_MASTER_SERVER=...`).
+All settings can also be set via **environment variables** using `_` as a separator (e.g. `IPSC_PORT=50000`).
 
 ### General
 
@@ -227,66 +227,66 @@ All settings can also be set via **environment variables** using `_` as a separa
 | `ipsc.auth.enabled` | bool   | `false`       | Enable IPSC authentication                  |
 | `ipsc.auth.key`     | string | -             | Hex authentication key (up to 40 chars)     |
 
-### HBRP (array — one entry per DMR master)
+### MMDVM (array — one entry per DMR master)
 
-|        Setting         |  Type   | Default |                   Description                    |
-| ---------------------- | ------- | ------- | ------------------------------------------------ |
-| `hbrp[].name`          | string  | -       | Friendly name for this network (used in logging) |
-| `hbrp[].master-server` | string  | -       | DMR master `host:port`                           |
-| `hbrp[].password`      | string  | -       | Hotspot password                                 |
-| `hbrp[].callsign`      | string  | -       | Your amateur radio callsign                      |
-| `hbrp[].radio-id`      | uint32  | -       | Your registered DMR repeater ID                  |
-| `hbrp[].rx-freq`       | uint    | -       | Receive frequency in Hz                          |
-| `hbrp[].tx-freq`       | uint    | -       | Transmit frequency in Hz                         |
-| `hbrp[].tx-power`      | uint8   | `0`     | Transmit power in dBm                            |
-| `hbrp[].color-code`    | uint8   | `0`     | DMR color code (0–15)                            |
-| `hbrp[].latitude`      | float64 | `0`     | Latitude (−90 to +90)                            |
-| `hbrp[].longitude`     | float64 | `0`     | Longitude (−180 to +180)                         |
-| `hbrp[].height`        | uint16  | `0`     | Antenna height in meters                         |
-| `hbrp[].location`      | string  | -       | Location description                             |
-| `hbrp[].description`   | string  | -       | Repeater description                             |
-| `hbrp[].url`           | string  | -       | Repeater URL                                     |
+|         Setting         |  Type   | Default |                   Description                    |
+| ----------------------- | ------- | ------- | ------------------------------------------------ |
+| `mmdvm[].name`          | string  | -       | Friendly name for this network (used in logging) |
+| `mmdvm[].master-server` | string  | -       | DMR master `host:port`                           |
+| `mmdvm[].password`      | string  | -       | Hotspot password                                 |
+| `mmdvm[].callsign`      | string  | -       | Your amateur radio callsign                      |
+| `mmdvm[].radio-id`      | uint32  | -       | Your registered DMR repeater ID                  |
+| `mmdvm[].rx-freq`       | uint    | -       | Receive frequency in Hz                          |
+| `mmdvm[].tx-freq`       | uint    | -       | Transmit frequency in Hz                         |
+| `mmdvm[].tx-power`      | uint8   | `0`     | Transmit power in dBm                            |
+| `mmdvm[].color-code`    | uint8   | `0`     | DMR color code (0–15)                            |
+| `mmdvm[].latitude`      | float64 | `0`     | Latitude (−90 to +90)                            |
+| `mmdvm[].longitude`     | float64 | `0`     | Longitude (−180 to +180)                         |
+| `mmdvm[].height`        | uint16  | `0`     | Antenna height in meters                         |
+| `mmdvm[].location`      | string  | -       | Location description                             |
+| `mmdvm[].description`   | string  | -       | Repeater description                             |
+| `mmdvm[].url`           | string  | -       | Repeater URL                                     |
 
-### Rewrite Rules (per HBRP entry, optional)
+### Rewrite Rules (per MMDVM entry, optional)
 
 Rewrite rules control how DMR traffic is routed between the repeater and each master. They follow the same semantics as [DMRGateway](https://github.com/g4klx/DMRGateway): the first matching rule wins. If no rewrite rules are configured for a master, all traffic passes through unmodified.
 
 #### TGRewrite — remap group talkgroup calls
 
-|             Setting             | Type | Default |           Description           |
-| ------------------------------- | ---- | ------- | ------------------------------- |
-| `hbrp[].tg-rewrite[].from-slot` | uint | -       | Source timeslot (1 or 2)        |
-| `hbrp[].tg-rewrite[].from-tg`   | uint | -       | Source talkgroup start          |
-| `hbrp[].tg-rewrite[].to-slot`   | uint | -       | Destination timeslot (1 or 2)   |
-| `hbrp[].tg-rewrite[].to-tg`     | uint | -       | Destination talkgroup start     |
-| `hbrp[].tg-rewrite[].range`     | uint | `1`     | Number of contiguous TGs to map |
+|             Setting              | Type | Default |           Description           |
+| -------------------------------- | ---- | ------- | ------------------------------- |
+| `mmdvm[].tg-rewrite[].from-slot` | uint | -       | Source timeslot (1 or 2)        |
+| `mmdvm[].tg-rewrite[].from-tg`   | uint | -       | Source talkgroup start          |
+| `mmdvm[].tg-rewrite[].to-slot`   | uint | -       | Destination timeslot (1 or 2)   |
+| `mmdvm[].tg-rewrite[].to-tg`     | uint | -       | Destination talkgroup start     |
+| `mmdvm[].tg-rewrite[].range`     | uint | `1`     | Number of contiguous TGs to map |
 
 #### PCRewrite — remap private calls by destination ID
 
-| Setting                          | Type | Default | Description                      |
-| -------------------------------- | ---- | ------- | -------------------------------- |
-| `hbrp[].pc-rewrite[].from-slot`  | uint | -       | Source timeslot (1 or 2)         |
-| `hbrp[].pc-rewrite[].from-id`    | uint | -       | Source private call ID start     |
-| `hbrp[].pc-rewrite[].to-slot`    | uint | -       | Destination timeslot (1 or 2)    |
-| `hbrp[].pc-rewrite[].to-id`      | uint | -       | Destination private call ID start|
-| `hbrp[].pc-rewrite[].range`      | uint | `1`     | Number of contiguous IDs to map  |
+|             Setting              | Type | Default |            Description            |
+| -------------------------------- | ---- | ------- | --------------------------------- |
+| `mmdvm[].pc-rewrite[].from-slot` | uint | -       | Source timeslot (1 or 2)          |
+| `mmdvm[].pc-rewrite[].from-id`   | uint | -       | Source private call ID start      |
+| `mmdvm[].pc-rewrite[].to-slot`   | uint | -       | Destination timeslot (1 or 2)     |
+| `mmdvm[].pc-rewrite[].to-id`     | uint | -       | Destination private call ID start |
+| `mmdvm[].pc-rewrite[].range`     | uint | `1`     | Number of contiguous IDs to map   |
 
 #### TypeRewrite — convert group TG calls to private calls
 
-|              Setting              | Type | Default |             Description             |
-| --------------------------------- | ---- | ------- | ----------------------------------- |
-| `hbrp[].type-rewrite[].from-slot` | uint | -       | Source timeslot (1 or 2)            |
-| `hbrp[].type-rewrite[].from-tg`   | uint | -       | Source talkgroup start              |
-| `hbrp[].type-rewrite[].to-slot`   | uint | -       | Destination timeslot (1 or 2)       |
-| `hbrp[].type-rewrite[].to-id`     | uint | -       | Destination private call ID start   |
-| `hbrp[].type-rewrite[].range`     | uint | `1`     | Number of contiguous entries to map |
+|              Setting               | Type | Default |             Description             |
+| ---------------------------------- | ---- | ------- | ----------------------------------- |
+| `mmdvm[].type-rewrite[].from-slot` | uint | -       | Source timeslot (1 or 2)            |
+| `mmdvm[].type-rewrite[].from-tg`   | uint | -       | Source talkgroup start              |
+| `mmdvm[].type-rewrite[].to-slot`   | uint | -       | Destination timeslot (1 or 2)       |
+| `mmdvm[].type-rewrite[].to-id`     | uint | -       | Destination private call ID start   |
+| `mmdvm[].type-rewrite[].range`     | uint | `1`     | Number of contiguous entries to map |
 
 #### SrcRewrite — match private calls by source, rewrite as group TG
 
-|             Setting              | Type | Default |           Description           |
-| -------------------------------- | ---- | ------- | ------------------------------- |
-| `hbrp[].src-rewrite[].from-slot` | uint | -       | Source timeslot (1 or 2)        |
-| `hbrp[].src-rewrite[].from-id`   | uint | -       | Source subscriber ID start      |
-| `hbrp[].src-rewrite[].to-slot`   | uint | -       | Destination timeslot (1 or 2)   |
-| `hbrp[].src-rewrite[].to-tg`     | uint | -       | Destination talkgroup           |
-| `hbrp[].src-rewrite[].range`     | uint | `1`     | Number of contiguous source IDs |
+|              Setting              | Type | Default |           Description           |
+| --------------------------------- | ---- | ------- | ------------------------------- |
+| `mmdvm[].src-rewrite[].from-slot` | uint | -       | Source timeslot (1 or 2)        |
+| `mmdvm[].src-rewrite[].from-id`   | uint | -       | Source subscriber ID start      |
+| `mmdvm[].src-rewrite[].to-slot`   | uint | -       | Destination timeslot (1 or 2)   |
+| `mmdvm[].src-rewrite[].to-tg`     | uint | -       | Destination talkgroup           |
+| `mmdvm[].src-rewrite[].range`     | uint | `1`     | Number of contiguous source IDs |

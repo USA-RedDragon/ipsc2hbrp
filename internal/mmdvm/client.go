@@ -1,4 +1,4 @@
-package hbrp
+package mmdvm
 
 import (
 	"context"
@@ -10,14 +10,14 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/USA-RedDragon/ipsc2hbrp/internal/config"
-	"github.com/USA-RedDragon/ipsc2hbrp/internal/hbrp/proto"
-	"github.com/USA-RedDragon/ipsc2hbrp/internal/hbrp/rewrite"
-	"github.com/USA-RedDragon/ipsc2hbrp/internal/ipsc"
+	"github.com/USA-RedDragon/ipsc2mmdvm/internal/config"
+	"github.com/USA-RedDragon/ipsc2mmdvm/internal/ipsc"
+	"github.com/USA-RedDragon/ipsc2mmdvm/internal/mmdvm/proto"
+	"github.com/USA-RedDragon/ipsc2mmdvm/internal/mmdvm/rewrite"
 )
 
-type HBRPClient struct {
-	hbrpCfg     *config.HBRP
+type MMDVMClient struct {
+	cfg         *config.MMDVM
 	started     atomic.Bool
 	done        chan struct{}
 	stopOnce    sync.Once
@@ -55,14 +55,14 @@ const (
 	packetTypeMstack = "MSTACK"
 )
 
-func NewHBRPClient(hbrpCfg *config.HBRP) *HBRPClient {
+func NewMMDVMClient(cfg *config.MMDVM) *MMDVMClient {
 	tx_chan := make(chan proto.Packet, 256)
 	translator, err := ipsc.NewIPSCTranslator()
 	if err != nil {
 		slog.Warn("failed to load IPSC translator", "error", err)
 	}
-	c := &HBRPClient{
-		hbrpCfg:    hbrpCfg,
+	c := &MMDVMClient{
+		cfg:        cfg,
 		done:       make(chan struct{}),
 		tx_chan:    tx_chan,
 		connRX:     make(chan []byte, 16),
@@ -77,8 +77,8 @@ func NewHBRPClient(hbrpCfg *config.HBRP) *HBRPClient {
 }
 
 // Name returns the configured network name for this client.
-func (h *HBRPClient) Name() string {
-	return h.hbrpCfg.Name
+func (h *MMDVMClient) Name() string {
+	return h.cfg.Name
 }
 
 // buildRewriteRules constructs the rewrite rule chains from config.
@@ -89,10 +89,10 @@ func (h *HBRPClient) Name() string {
 // PCRewrite only creates an RF rewrite (outbound).
 // TypeRewrite only creates an RF rewrite (outbound).
 // SrcRewrite only creates a Net rewrite (inbound).
-func (h *HBRPClient) buildRewriteRules() {
-	name := h.hbrpCfg.Name
+func (h *MMDVMClient) buildRewriteRules() {
+	name := h.cfg.Name
 
-	for _, cfg := range h.hbrpCfg.TGRewrites {
+	for _, cfg := range h.cfg.TGRewrites {
 		rng := cfg.Range
 		if rng == 0 {
 			rng = 1
@@ -108,7 +108,7 @@ func (h *HBRPClient) buildRewriteRules() {
 		})
 	}
 
-	for _, cfg := range h.hbrpCfg.PCRewrites {
+	for _, cfg := range h.cfg.PCRewrites {
 		rng := cfg.Range
 		if rng == 0 {
 			rng = 1
@@ -119,7 +119,7 @@ func (h *HBRPClient) buildRewriteRules() {
 		})
 	}
 
-	for _, cfg := range h.hbrpCfg.TypeRewrites {
+	for _, cfg := range h.cfg.TypeRewrites {
 		rng := cfg.Range
 		if rng == 0 {
 			rng = 1
@@ -130,7 +130,7 @@ func (h *HBRPClient) buildRewriteRules() {
 		})
 	}
 
-	for _, cfg := range h.hbrpCfg.SrcRewrites {
+	for _, cfg := range h.cfg.SrcRewrites {
 		rng := cfg.Range
 		if rng == 0 {
 			rng = 1
@@ -142,12 +142,12 @@ func (h *HBRPClient) buildRewriteRules() {
 	}
 }
 
-func (h *HBRPClient) Start() error {
+func (h *MMDVMClient) Start() error {
 	if h.translator != nil {
-		h.translator.SetPeerID(h.hbrpCfg.ID)
+		h.translator.SetPeerID(h.cfg.ID)
 	}
 
-	slog.Info("Connecting to HBRP server", "network", h.hbrpCfg.Name)
+	slog.Info("Connecting to MMDVM server", "network", h.cfg.Name)
 
 	err := h.connect()
 	if err != nil {
@@ -169,10 +169,10 @@ func (h *HBRPClient) Start() error {
 	return nil
 }
 
-func (h *HBRPClient) connect() error {
+func (h *MMDVMClient) connect() error {
 	var err error
 	var d net.Dialer
-	conn, err := d.DialContext(context.Background(), "udp", h.hbrpCfg.MasterServer)
+	conn, err := d.DialContext(context.Background(), "udp", h.cfg.MasterServer)
 	if err != nil {
 		return err
 	}
@@ -182,54 +182,55 @@ func (h *HBRPClient) connect() error {
 	return nil
 }
 
-func (h *HBRPClient) handler() {
+func (h *MMDVMClient) handler() {
 	defer h.wg.Done()
 	for {
 		select {
 		case data := <-h.connRX:
+			slog.Debug("received packet", "data", fmt.Sprintf("% X", data), "strdata", string(data), "network", h.cfg.Name)
 			if len(data) < 4 {
-				slog.Warn("Ignoring short packet from HBRP server", "network", h.hbrpCfg.Name, "length", len(data))
+				slog.Warn("Ignoring short packet from MMDVM server", "network", h.cfg.Name, "length", len(data))
 				continue
 			}
 			currentState := h.state.Load()
 			switch currentState {
 			case uint32(STATE_IDLE):
-				slog.Info("Got data from HBRP server while idle", "network", h.hbrpCfg.Name)
+				slog.Info("Got data from MMDVM server while idle", "network", h.cfg.Name)
 			case uint32(STATE_SENT_LOGIN):
-				if len(data) >= 6 && string(data[:6]) == packetTypeMstack {
-					if len(data) < 14 {
-						slog.Warn("MSTACK response too short", "network", h.hbrpCfg.Name, "length", len(data))
+				if len(data) >= 6 && string(data[:6]) == "RPTACK" {
+					if len(data) < 10 {
+						slog.Warn("RPTACK response too short", "network", h.cfg.Name, "length", len(data))
 						continue
 					}
-					slog.Info("Connected. Authenticating", "network", h.hbrpCfg.Name)
-					random := data[len(data)-8:]
+					slog.Info("Connected. Authenticating", "network", h.cfg.Name)
+					random := data[len(data)-4:]
 					h.sendRPTK(random)
 					h.state.Store(uint32(STATE_SENT_AUTH))
 				} else {
-					slog.Info("Server rejected login request", "network", h.hbrpCfg.Name)
+					slog.Info("Server rejected login request", "network", h.cfg.Name)
 					time.Sleep(1 * time.Second)
 					h.sendLogin()
 				}
 			case uint32(STATE_SENT_AUTH):
-				if len(data) >= 6 && string(data[:6]) == packetTypeMstack {
-					slog.Info("Authenticated. Sending configuration", "network", h.hbrpCfg.Name)
+				if len(data) >= 6 && string(data[:6]) == "RPTACK" {
+					slog.Info("Authenticated. Sending configuration", "network", h.cfg.Name)
 					h.state.Store(uint32(STATE_SENT_RPTC))
 					h.sendRPTC()
-				} else if len(data) >= 6 && string(data[:6]) == "MSTNAK" {
-					slog.Info("Password rejected", "network", h.hbrpCfg.Name)
+				} else if len(data) >= 6 && string(data[:6]) == "RPTNAK" {
+					slog.Info("Password rejected", "network", h.cfg.Name)
 					h.state.Store(uint32(STATE_SENT_LOGIN))
 					time.Sleep(1 * time.Second)
 					h.sendLogin()
 				}
 			case uint32(STATE_SENT_RPTC):
 				// The data starts with either MSTACK or MSTNAK
-				if len(data) >= 6 && string(data[:6]) == packetTypeMstack {
-					slog.Info("Config accepted, starting ping routine", "network", h.hbrpCfg.Name)
+				if len(data) >= 6 && string(data[:6]) == "RPTACK" {
+					slog.Info("Config accepted, starting ping routine", "network", h.cfg.Name)
 					h.wg.Add(1)
 					go h.ping()
 					h.state.Store(uint32(STATE_READY))
 				} else if len(data) >= 6 && string(data[:6]) == "MSTNAK" {
-					slog.Info("Configuration rejected", "network", h.hbrpCfg.Name)
+					slog.Info("Configuration rejected", "network", h.cfg.Name)
 					time.Sleep(1 * time.Second)
 					h.sendRPTC()
 				}
@@ -241,20 +242,20 @@ func (h *HBRPClient) handler() {
 					}
 				case "RPTS":
 					if len(data) >= 7 && string(data[:7]) == "RPTSBKN" {
-						slog.Info("Server requested a roaming beacon transmission", "network", h.hbrpCfg.Name)
+						slog.Info("Server requested a roaming beacon transmission", "network", h.cfg.Name)
 					}
 				case "DMRD":
 					packet, ok := proto.Decode(data)
 					if !ok {
-						slog.Info("Error unpacking packet", "network", h.hbrpCfg.Name)
+						slog.Info("Error unpacking packet", "network", h.cfg.Name)
 						continue
 					}
-					slog.Debug("HBRP DMRD received", "network", h.hbrpCfg.Name, "packet", packet)
+					slog.Debug("MMDVM DMRD received", "network", h.cfg.Name, "packet", packet)
 
 					// Apply net→RF rewrite rules (inbound from this master)
 					if len(h.netRewrites) > 0 {
 						if !rewrite.Apply(h.netRewrites, &packet, false) {
-							slog.Debug("HBRP DMRD dropped (no rewrite rule matched)", "network", h.hbrpCfg.Name)
+							slog.Debug("MMDVM DMRD dropped (no rewrite rule matched)", "network", h.cfg.Name)
 							continue
 						}
 					}
@@ -266,10 +267,10 @@ func (h *HBRPClient) handler() {
 						}
 					}
 				default:
-					slog.Info("Got unknown packet from HBRP server", "network", h.hbrpCfg.Name, "data", data)
+					slog.Info("Got unknown packet from MMDVM server", "network", h.cfg.Name, "data", data)
 				}
 			case uint32(STATE_TIMEOUT):
-				slog.Info("Got data from HBRP server while in timeout state", "network", h.hbrpCfg.Name)
+				slog.Info("Got data from MMDVM server while in timeout state", "network", h.cfg.Name)
 			}
 		case <-h.done:
 			return
@@ -277,7 +278,7 @@ func (h *HBRPClient) handler() {
 	}
 }
 
-func (h *HBRPClient) ping() {
+func (h *MMDVMClient) ping() {
 	defer h.wg.Done()
 	ticker := time.NewTicker(h.keepAlive)
 	defer ticker.Stop()
@@ -288,7 +289,7 @@ func (h *HBRPClient) ping() {
 		case <-ticker.C:
 			lastPingTime := time.Unix(0, h.lastPing.Load())
 			if time.Now().After(lastPingTime.Add(h.timeout)) {
-				slog.Info("Connection timed out", "network", h.hbrpCfg.Name)
+				slog.Info("Connection timed out", "network", h.cfg.Name)
 				h.reconnect()
 				return
 			}
@@ -303,7 +304,7 @@ func (h *HBRPClient) ping() {
 // triggers a reconnect if the client doesn't reach STATE_READY
 // within the timeout period. Once STATE_READY is reached the ping()
 // goroutine takes over liveness monitoring.
-func (h *HBRPClient) handshakeWatchdog() {
+func (h *MMDVMClient) handshakeWatchdog() {
 	defer h.wg.Done()
 	ticker := time.NewTicker(h.timeout)
 	defer ticker.Stop()
@@ -315,7 +316,7 @@ func (h *HBRPClient) handshakeWatchdog() {
 				// Handshake completed, ping() is now responsible.
 				return
 			}
-			slog.Warn("Handshake timed out, reconnecting", "network", h.hbrpCfg.Name, "state", st)
+			slog.Warn("Handshake timed out, reconnecting", "network", h.cfg.Name, "state", st)
 			h.reconnect()
 			// Stay in the loop to watch the next handshake attempt.
 		case <-h.done:
@@ -326,23 +327,23 @@ func (h *HBRPClient) handshakeWatchdog() {
 
 // reconnect closes the current connection, dials a new one, and
 // sends a fresh login. It is safe to call from any goroutine.
-func (h *HBRPClient) reconnect() {
+func (h *MMDVMClient) reconnect() {
 	h.state.Store(uint32(STATE_TIMEOUT))
 	h.connMu.Lock()
 	if h.conn != nil {
 		if err := h.conn.Close(); err != nil {
-			slog.Error("Error closing connection", "network", h.hbrpCfg.Name, "error", err)
+			slog.Error("Error closing connection", "network", h.cfg.Name, "error", err)
 		}
 	}
 	h.connMu.Unlock()
 	if err := h.connect(); err != nil {
-		slog.Error("Error reconnecting to HBRP server", "network", h.hbrpCfg.Name, "error", err)
+		slog.Error("Error reconnecting to MMDVM server", "network", h.cfg.Name, "error", err)
 	}
 	h.state.Store(uint32(STATE_SENT_LOGIN))
 	h.sendLogin()
 }
 
-func (h *HBRPClient) tx() {
+func (h *MMDVMClient) tx() {
 	defer h.wg.Done()
 	for {
 		select {
@@ -350,6 +351,7 @@ func (h *HBRPClient) tx() {
 			return
 		case data := <-h.connTX:
 			h.connMu.Lock()
+			slog.Debug("sending packet", "data", fmt.Sprintf("%4X", data), "strdata", string(data), "network", h.cfg.Name)
 			_, err := h.conn.Write(data)
 			h.connMu.Unlock()
 			if err != nil {
@@ -360,7 +362,7 @@ func (h *HBRPClient) tx() {
 					select {
 					case h.connTX <- data:
 					default:
-						slog.Warn("connTX full, dropping packet during reconnect", "network", h.hbrpCfg.Name)
+						slog.Warn("connTX full, dropping packet during reconnect", "network", h.cfg.Name)
 					}
 					select {
 					case <-time.After(100 * time.Millisecond):
@@ -369,14 +371,14 @@ func (h *HBRPClient) tx() {
 						return
 					}
 				}
-				slog.Error("Error writing to HBRP server", "network", h.hbrpCfg.Name, "error", err)
+				slog.Error("Error writing to MMDVM server", "network", h.cfg.Name, "error", err)
 				continue
 			}
 		}
 	}
 }
 
-func (h *HBRPClient) rx() {
+func (h *MMDVMClient) rx() {
 	defer h.wg.Done()
 	for {
 		h.connMu.Lock()
@@ -401,7 +403,7 @@ func (h *HBRPClient) rx() {
 					return
 				}
 			}
-			slog.Error("Error reading from HBRP server", "network", h.hbrpCfg.Name, "error", err)
+			slog.Error("Error reading from MMDVM server", "network", h.cfg.Name, "error", err)
 			continue
 		}
 		select {
@@ -412,9 +414,9 @@ func (h *HBRPClient) rx() {
 	}
 }
 
-func (h *HBRPClient) Stop() {
+func (h *MMDVMClient) Stop() {
 	h.stopOnce.Do(func() {
-		slog.Info("Stopping HBRP client", "network", h.hbrpCfg.Name)
+		slog.Info("Stopping MMDVM client", "network", h.cfg.Name)
 
 		// Signal all goroutines to stop.
 		close(h.done)
@@ -436,18 +438,18 @@ func (h *HBRPClient) Stop() {
 
 // sendRPTCLDirect writes the disconnect message directly on the connection.
 // Must be called with connMu held.
-func (h *HBRPClient) sendRPTCLDirect() {
+func (h *MMDVMClient) sendRPTCLDirect() {
 	hexid := make([]byte, 8)
-	copy(hexid, []byte(fmt.Sprintf("%08x", h.hbrpCfg.ID)))
+	copy(hexid, []byte(fmt.Sprintf("%08x", h.cfg.ID)))
 	data := make([]byte, len("RPTCL")+8)
 	n := copy(data, "RPTCL")
 	copy(data[n:], hexid)
 	if _, err := h.conn.Write(data); err != nil {
-		slog.Error("Error sending RPTCL disconnect", "network", h.hbrpCfg.Name, "error", err)
+		slog.Error("Error sending RPTCL disconnect", "network", h.cfg.Name, "error", err)
 	}
 }
 
-func (h *HBRPClient) forwardTX() {
+func (h *MMDVMClient) forwardTX() {
 	defer h.wg.Done()
 	for {
 		select {
@@ -459,26 +461,26 @@ func (h *HBRPClient) forwardTX() {
 	}
 }
 
-func (h *HBRPClient) SetIPSCHandler(handler func(data []byte)) {
+func (h *MMDVMClient) SetIPSCHandler(handler func(data []byte)) {
 	h.ipscHandler = handler
 }
 
 // HandleIPSCBurst handles an incoming IPSC burst from the IPSC server.
 // This is called when a connected IPSC peer transmits voice/data.
-// It translates the IPSC packet(s) to HBRP DMRD format and forwards them.
+// It translates the IPSC packet(s) to MMDVM DMRD format and forwards them.
 // If RF rewrite rules are configured, the packet is only forwarded if a rule matches.
-func (h *HBRPClient) HandleIPSCBurst(packetType byte, data []byte, addr *net.UDPAddr) {
+func (h *MMDVMClient) HandleIPSCBurst(packetType byte, data []byte, addr *net.UDPAddr) {
 	if !h.started.Load() {
 		return
 	}
-	slog.Debug("HandleIPSCBurst: received IPSC burst", "network", h.hbrpCfg.Name, "type", packetType, "from", addr, "length", len(data))
+	slog.Debug("HandleIPSCBurst: received IPSC burst", "network", h.cfg.Name, "type", packetType, "from", addr, "length", len(data))
 
-	packets := h.translator.TranslateToHBRP(packetType, data)
+	packets := h.translator.TranslateToMMDVM(packetType, data)
 	for _, pkt := range packets {
 		// Apply RF→Net rewrite rules (outbound to this master)
 		if len(h.rfRewrites) > 0 {
 			if !rewrite.Apply(h.rfRewrites, &pkt, false) {
-				slog.Debug("HandleIPSCBurst: dropped (no RF rewrite rule matched)", "network", h.hbrpCfg.Name)
+				slog.Debug("HandleIPSCBurst: dropped (no RF rewrite rule matched)", "network", h.cfg.Name)
 				continue
 			}
 		}

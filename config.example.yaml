@@ -9,7 +9,7 @@ ipsc:
     enabled: false
     key: ""
 
-hbrp:
+mmdvm:
   - name: "BrandMeister"
     master-server: "3104.master.brandmeister.network:62030"
     password: "passw0rd"

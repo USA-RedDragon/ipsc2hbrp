@@ -1,4 +1,4 @@
-module github.com/USA-RedDragon/ipsc2hbrp
+module github.com/USA-RedDragon/ipsc2mmdvm
 
 go 1.25.7
 

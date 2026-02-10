@@ -8,9 +8,9 @@ import (
 	"syscall"
 
 	"github.com/USA-RedDragon/configulator"
-	"github.com/USA-RedDragon/ipsc2hbrp/internal/config"
-	"github.com/USA-RedDragon/ipsc2hbrp/internal/hbrp"
-	"github.com/USA-RedDragon/ipsc2hbrp/internal/ipsc"
+	"github.com/USA-RedDragon/ipsc2mmdvm/internal/config"
+	"github.com/USA-RedDragon/ipsc2mmdvm/internal/ipsc"
+	"github.com/USA-RedDragon/ipsc2mmdvm/internal/mmdvm"
 	"github.com/lmittmann/tint"
 	"github.com/spf13/cobra"
 	"github.com/ztrue/shutdown"
@@ -18,7 +18,7 @@ import (
 
 func NewCommand(version, commit string) *cobra.Command {
 	cmd := &cobra.Command{
-		Use:     "ipsc2hbrp",
+		Use:     "ipsc2mmdvm",
 		Version: fmt.Sprintf("%s - %s", version, commit),
 		Annotations: map[string]string{
 			"version": version,
@@ -33,7 +33,7 @@ func NewCommand(version, commit string) *cobra.Command {
 
 func runRoot(cmd *cobra.Command, _ []string) error {
 	ctx := cmd.Context()
-	fmt.Printf("ipsc2hbrp - %s (%s)\n", cmd.Annotations["version"], cmd.Annotations["commit"])
+	fmt.Printf("ipsc2mmdvm - %s (%s)\n", cmd.Annotations["version"], cmd.Annotations["commit"])
 
 	c, err := configulator.FromContext[config.Config](ctx)
 	if err != nil {
@@ -58,22 +58,22 @@ func runRoot(cmd *cobra.Command, _ []string) error {
 	}
 	slog.SetDefault(logger)
 
-	// Create one HBRP client per configured network (DMR master).
-	hbrpClients := make([]*hbrp.HBRPClient, 0, len(cfg.HBRP))
-	for i := range cfg.HBRP {
-		client := hbrp.NewHBRPClient(&cfg.HBRP[i])
+	// Create one MMDVM client per configured network (DMR master).
+	mmdvmClients := make([]*mmdvm.MMDVMClient, 0, len(cfg.MMDVM))
+	for i := range cfg.MMDVM {
+		client := mmdvm.NewMMDVMClient(&cfg.MMDVM[i])
 		err = client.Start()
 		if err != nil {
-			return fmt.Errorf("failed to start HBRP client %q: %w", cfg.HBRP[i].Name, err)
+			return fmt.Errorf("failed to start MMDVM client %q: %w", cfg.MMDVM[i].Name, err)
 		}
-		hbrpClients = append(hbrpClients, client)
+		mmdvmClients = append(mmdvmClients, client)
 	}
 
 	ipscServer := ipsc.NewIPSCServer(cfg)
 
-	// Wire IPSC bursts to all HBRP clients.
+	// Wire IPSC bursts to all MMDVM clients.
 	ipscServer.SetBurstHandler(func(packetType byte, data []byte, addr *net.UDPAddr) {
-		for _, client := range hbrpClients {
+		for _, client := range mmdvmClients {
 			// Each client has its own copy of data and applies its own rewrite rules.
 			dataCopy := make([]byte, len(data))
 			copy(dataCopy, data)
@@ -81,8 +81,8 @@ func runRoot(cmd *cobra.Command, _ []string) error {
 		}
 	})
 
-	// Wire all HBRP clients' inbound data to the IPSC server.
-	for _, client := range hbrpClients {
+	// Wire all MMDVM clients' inbound data to the IPSC server.
+	for _, client := range mmdvmClients {
 		client.SetIPSCHandler(ipscServer.SendUserPacket)
 	}
 
@@ -95,7 +95,7 @@ func runRoot(cmd *cobra.Command, _ []string) error {
 		slog.Info("received signal, shutting down...", "signal", sig.String())
 
 		ipscServer.Stop()
-		for _, client := range hbrpClients {
+		for _, client := range mmdvmClients {
 			client.Stop()
 		}
 	}

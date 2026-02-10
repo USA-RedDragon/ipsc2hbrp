@@ -6,8 +6,8 @@ import (
 	"os"
 
 	"github.com/USA-RedDragon/configulator"
-	"github.com/USA-RedDragon/ipsc2hbrp/cmd"
-	"github.com/USA-RedDragon/ipsc2hbrp/internal/config"
+	"github.com/USA-RedDragon/ipsc2mmdvm/cmd"
+	"github.com/USA-RedDragon/ipsc2mmdvm/internal/config"
 )
 
 // https://goreleaser.com/cookbooks/using-main.version/
