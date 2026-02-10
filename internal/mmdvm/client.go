@@ -36,8 +36,9 @@ type MMDVMClient struct {
 
 	// Rewrite rules built from config, applied to packets
 	// flowing through this network.
-	rfRewrites  []rewrite.Rule // RF→Net (outbound to this master)
-	netRewrites []rewrite.Rule // Net→RF (inbound from this master)
+	rfRewrites      []rewrite.Rule // RF→Net (outbound to this master)
+	netRewrites     []rewrite.Rule // Net→RF (inbound from this master)
+	passallRewrites []rewrite.Rule // PassAll fallback for RF→Net
 }
 
 type state uint8
@@ -137,8 +138,27 @@ func (h *MMDVMClient) buildRewriteRules() {
 		}
 		h.netRewrites = append(h.netRewrites, &rewrite.SrcRewrite{
 			Name: name, FromSlot: cfg.FromSlot, FromID: cfg.FromID,
-			ToSlot: cfg.ToSlot, ToTG: cfg.ToTG, Range: rng,
+			ToSlot: cfg.ToSlot, ToID: cfg.ToID, Range: rng,
 		})
+	}
+
+	for _, slot := range h.cfg.PassAllTG {
+		if slot < 0 {
+			continue
+		}
+		s := uint(slot) //nolint:gosec
+		r := &rewrite.PassAllTG{Name: name, Slot: s}
+		h.passallRewrites = append(h.passallRewrites, r)
+		h.netRewrites = append(h.netRewrites, &rewrite.PassAllTG{Name: name, Slot: s})
+	}
+	for _, slot := range h.cfg.PassAllPC {
+		if slot < 0 {
+			continue
+		}
+		s := uint(slot) //nolint:gosec
+		r := &rewrite.PassAllPC{Name: name, Slot: s}
+		h.passallRewrites = append(h.passallRewrites, r)
+		h.netRewrites = append(h.netRewrites, &rewrite.PassAllPC{Name: name, Slot: s})
 	}
 }
 
@@ -182,6 +202,8 @@ func (h *MMDVMClient) connect() error {
 	return nil
 }
 
+const rptAck = "RPTACK"
+
 func (h *MMDVMClient) handler() {
 	defer h.wg.Done()
 	for {
@@ -192,89 +214,107 @@ func (h *MMDVMClient) handler() {
 				slog.Warn("Ignoring short packet from MMDVM server", "network", h.cfg.Name, "length", len(data))
 				continue
 			}
-			currentState := h.state.Load()
-			switch currentState {
-			case uint32(STATE_IDLE):
-				slog.Info("Got data from MMDVM server while idle", "network", h.cfg.Name)
-			case uint32(STATE_SENT_LOGIN):
-				if len(data) >= 6 && string(data[:6]) == "RPTACK" {
-					if len(data) < 10 {
-						slog.Warn("RPTACK response too short", "network", h.cfg.Name, "length", len(data))
-						continue
-					}
-					slog.Info("Connected. Authenticating", "network", h.cfg.Name)
-					random := data[len(data)-4:]
-					h.sendRPTK(random)
-					h.state.Store(uint32(STATE_SENT_AUTH))
-				} else {
-					slog.Info("Server rejected login request", "network", h.cfg.Name)
-					time.Sleep(1 * time.Second)
-					h.sendLogin()
-				}
-			case uint32(STATE_SENT_AUTH):
-				if len(data) >= 6 && string(data[:6]) == "RPTACK" {
-					slog.Info("Authenticated. Sending configuration", "network", h.cfg.Name)
-					h.state.Store(uint32(STATE_SENT_RPTC))
-					h.sendRPTC()
-				} else if len(data) >= 6 && string(data[:6]) == "RPTNAK" {
-					slog.Info("Password rejected", "network", h.cfg.Name)
-					h.state.Store(uint32(STATE_SENT_LOGIN))
-					time.Sleep(1 * time.Second)
-					h.sendLogin()
-				}
-			case uint32(STATE_SENT_RPTC):
-				// The data starts with either MSTACK or MSTNAK
-				if len(data) >= 6 && string(data[:6]) == "RPTACK" {
-					slog.Info("Config accepted, starting ping routine", "network", h.cfg.Name)
-					h.state.Store(uint32(STATE_READY))
-					h.wg.Add(1)
-					go h.ping()
-				} else if len(data) >= 6 && string(data[:6]) == "MSTNAK" {
-					slog.Info("Configuration rejected", "network", h.cfg.Name)
-					time.Sleep(1 * time.Second)
-					h.sendRPTC()
-				}
-			case uint32(STATE_READY):
-				switch string(data[:4]) {
-				case "MSTP":
-					if len(data) >= 7 && string(data[:7]) == "MSTPONG" {
-						h.lastPing.Store(time.Now().UnixNano())
-					}
-				case "RPTS":
-					if len(data) >= 7 && string(data[:7]) == "RPTSBKN" {
-						slog.Info("Server requested a roaming beacon transmission", "network", h.cfg.Name)
-					}
-				case "DMRD":
-					packet, ok := proto.Decode(data)
-					if !ok {
-						slog.Info("Error unpacking packet", "network", h.cfg.Name)
-						continue
-					}
-					slog.Debug("MMDVM DMRD received", "network", h.cfg.Name, "packet", packet)
-
-					// Apply net→RF rewrite rules (inbound from this master)
-					if len(h.netRewrites) > 0 {
-						if !rewrite.Apply(h.netRewrites, &packet, false) {
-							slog.Debug("MMDVM DMRD dropped (no rewrite rule matched)", "network", h.cfg.Name)
-							continue
-						}
-					}
-
-					if h.ipscHandler != nil && h.translator != nil {
-						ipscPackets := h.translator.TranslateToIPSC(packet)
-						for _, ipscData := range ipscPackets {
-							h.ipscHandler(ipscData)
-						}
-					}
-				default:
-					slog.Info("Got unknown packet from MMDVM server", "network", h.cfg.Name, "data", data)
-				}
-			case uint32(STATE_TIMEOUT):
-				slog.Info("Got data from MMDVM server while in timeout state", "network", h.cfg.Name)
-			}
+			h.handleState(data)
 		case <-h.done:
 			return
 		}
+	}
+}
+
+func (h *MMDVMClient) handleState(data []byte) {
+	currentState := h.state.Load()
+	switch currentState {
+	case uint32(STATE_IDLE):
+		slog.Info("Got data from MMDVM server while idle", "network", h.cfg.Name)
+	case uint32(STATE_SENT_LOGIN):
+		h.handleSentLogin(data)
+	case uint32(STATE_SENT_AUTH):
+		h.handleSentAuth(data)
+	case uint32(STATE_SENT_RPTC):
+		h.handleSentRPTC(data)
+	case uint32(STATE_READY):
+		h.handleReady(data)
+	case uint32(STATE_TIMEOUT):
+		slog.Info("Got data from MMDVM server while in timeout state", "network", h.cfg.Name)
+	}
+}
+
+func (h *MMDVMClient) handleSentLogin(data []byte) {
+	if len(data) >= 6 && string(data[:6]) == rptAck {
+		if len(data) < 10 {
+			slog.Warn("RPTACK response too short", "network", h.cfg.Name, "length", len(data))
+			return
+		}
+		slog.Info("Connected. Authenticating", "network", h.cfg.Name)
+		random := data[len(data)-4:]
+		h.sendRPTK(random)
+		h.state.Store(uint32(STATE_SENT_AUTH))
+	} else {
+		slog.Info("Server rejected login request", "network", h.cfg.Name)
+		time.Sleep(1 * time.Second)
+		h.sendLogin()
+	}
+}
+
+func (h *MMDVMClient) handleSentAuth(data []byte) {
+	if len(data) >= 6 && string(data[:6]) == rptAck {
+		slog.Info("Authenticated. Sending configuration", "network", h.cfg.Name)
+		h.state.Store(uint32(STATE_SENT_RPTC))
+		h.sendRPTC()
+	} else if len(data) >= 6 && string(data[:6]) == "RPTNAK" {
+		slog.Info("Password rejected", "network", h.cfg.Name)
+		h.state.Store(uint32(STATE_SENT_LOGIN))
+		time.Sleep(1 * time.Second)
+		h.sendLogin()
+	}
+}
+
+func (h *MMDVMClient) handleSentRPTC(data []byte) {
+	if len(data) >= 6 && string(data[:6]) == rptAck {
+		slog.Info("Config accepted, starting ping routine", "network", h.cfg.Name)
+		h.state.Store(uint32(STATE_READY))
+		h.wg.Add(1)
+		go h.ping()
+	} else if len(data) >= 6 && string(data[:6]) == "MSTNAK" {
+		slog.Info("Configuration rejected", "network", h.cfg.Name)
+		time.Sleep(1 * time.Second)
+		h.sendRPTC()
+	}
+}
+
+func (h *MMDVMClient) handleReady(data []byte) {
+	switch string(data[:4]) {
+	case "MSTP":
+		if len(data) >= 7 && string(data[:7]) == "MSTPONG" {
+			h.lastPing.Store(time.Now().UnixNano())
+		}
+	case "RPTS":
+		if len(data) >= 7 && string(data[:7]) == "RPTSBKN" {
+			slog.Info("Server requested a roaming beacon transmission", "network", h.cfg.Name)
+		}
+	case "DMRD":
+		packet, ok := proto.Decode(data)
+		if !ok {
+			slog.Info("Error unpacking packet", "network", h.cfg.Name)
+			return
+		}
+		slog.Debug("MMDVM DMRD received", "network", h.cfg.Name, "packet", packet)
+
+		if !rewrite.Apply(h.netRewrites, &packet) {
+			slog.Debug("MMDVM DMRD dropped (no rewrite rule matched)", "network", h.cfg.Name)
+			return
+		}
+
+		slog.Debug("MMDVM DMRD after rewrite", "network", h.cfg.Name, "packet", packet)
+
+		if h.ipscHandler != nil && h.translator != nil {
+			ipscPackets := h.translator.TranslateToIPSC(packet)
+			for _, ipscData := range ipscPackets {
+				h.ipscHandler(ipscData)
+			}
+		}
+	default:
+		slog.Info("Got unknown packet from MMDVM server", "network", h.cfg.Name, "data", data)
 	}
 }
 
@@ -311,7 +351,7 @@ func (h *MMDVMClient) handshakeWatchdog() {
 	for {
 		select {
 		case <-ticker.C:
-			st := state(h.state.Load())
+			st := state(h.state.Load() & 0xFF) //nolint:gosec
 			if st == STATE_READY {
 				// Handshake completed, ping() is now responsible.
 				return
@@ -465,30 +505,59 @@ func (h *MMDVMClient) SetIPSCHandler(handler func(data []byte)) {
 	h.ipscHandler = handler
 }
 
+// MatchesRules checks whether the given IPSC data would match this client's
+// rewrite rules without translating or modifying any state. It extracts
+// routing-relevant fields (src, dst, groupCall, slot) directly from the
+// IPSC packet header. When passallOnly is true, only passall rules are checked.
+func (h *MMDVMClient) MatchesRules(packetType byte, data []byte, passallOnly bool) bool {
+	if len(data) < 18 {
+		return false
+	}
+	// Build a probe packet from IPSC header fields.
+	probe := proto.Packet{
+		Src:       uint(data[6])<<16 | uint(data[7])<<8 | uint(data[8]),
+		Dst:       uint(data[9])<<16 | uint(data[10])<<8 | uint(data[11]),
+		GroupCall: packetType == 0x80 || packetType == 0x83,
+		Slot:      (data[17] & 0x20) != 0,
+	}
+	if passallOnly {
+		return rewrite.Apply(h.passallRewrites, &probe)
+	}
+	return rewrite.Apply(h.rfRewrites, &probe)
+}
+
 // HandleIPSCBurst handles an incoming IPSC burst from the IPSC server.
 // This is called when a connected IPSC peer transmits voice/data.
 // It translates the IPSC packet(s) to MMDVM DMRD format and forwards them.
-// If RF rewrite rules are configured, the packet is only forwarded if a rule matches.
-func (h *MMDVMClient) HandleIPSCBurst(packetType byte, data []byte, addr *net.UDPAddr) {
+// Callers should use MatchesRules first to determine which network wins,
+// then call HandleIPSCBurst only on the winning client.
+func (h *MMDVMClient) HandleIPSCBurst(packetType byte, data []byte, addr *net.UDPAddr) bool {
 	if !h.started.Load() {
-		return
+		return false
 	}
 	slog.Debug("HandleIPSCBurst: received IPSC burst", "network", h.cfg.Name, "type", packetType, "from", addr, "length", len(data))
 
 	packets := h.translator.TranslateToMMDVM(packetType, data)
+	matched := false
 	for _, pkt := range packets {
-		// Apply RF→Net rewrite rules (outbound to this master)
-		if len(h.rfRewrites) > 0 {
-			if !rewrite.Apply(h.rfRewrites, &pkt, false) {
-				slog.Debug("HandleIPSCBurst: dropped (no RF rewrite rule matched)", "network", h.cfg.Name)
+		slog.Debug("HandleIPSCBurst: pre-rewrite", "network", h.cfg.Name, "src", pkt.Src, "dst", pkt.Dst, "groupCall", pkt.GroupCall, "slot", pkt.Slot)
+		// Apply RF→Net rewrite rules (outbound to this master).
+		// Try specific rewrites first; if none match, try passall
+		// rules as a fallback.
+		if !rewrite.Apply(h.rfRewrites, &pkt) {
+			if !rewrite.Apply(h.passallRewrites, &pkt) {
+				slog.Debug("HandleIPSCBurst: dropped (no rewrite rule matched)", "network", h.cfg.Name)
 				continue
 			}
 		}
+		slog.Debug("HandleIPSCBurst: post-rewrite", "network", h.cfg.Name, "src", pkt.Src, "dst", pkt.Dst, "groupCall", pkt.GroupCall, "slot", pkt.Slot)
+		matched = true
 
 		select {
 		case h.tx_chan <- pkt:
 		case <-h.done:
-			return
+			return matched
 		}
 	}
+	return matched
 }

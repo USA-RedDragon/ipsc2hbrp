@@ -69,16 +69,10 @@ func Decode(data []byte) (Packet, bool) {
 	packet.Dst = uint(data[8])<<16 | uint(data[9])<<8 | uint(data[10])
 	packet.Repeater = uint(data[11])<<24 | uint(data[12])<<16 | uint(data[13])<<8 | uint(data[14])
 	bits := data[15]
-	packet.Slot = false
-	if (bits & 0x1) != 0 { //nolint:golint,gomnd
-		packet.Slot = true
-	}
-	packet.GroupCall = true
-	if (bits & 0x2) != 0 { //nolint:golint,gomnd
-		packet.GroupCall = false
-	}
-	packet.FrameType = uint((bits & 0xC) >> 2)    //nolint:golint,gomnd
-	packet.DTypeOrVSeq = uint((bits & 0xF0) >> 4) //nolint:golint,gomnd
+	packet.Slot = (bits & 0x80) != 0            //nolint:golint,gomnd
+	packet.GroupCall = (bits & 0x40) == 0       //nolint:golint,gomnd
+	packet.FrameType = uint((bits & 0x30) >> 4) //nolint:golint,gomnd
+	packet.DTypeOrVSeq = uint(bits & 0x0F)      //nolint:golint,gomnd
 	packet.StreamID = uint(data[16])<<24 | uint(data[17])<<16 | uint(data[18])<<8 | uint(data[19])
 	copy(packet.DMRData[:], data[20:53])
 	return packet, true
@@ -108,13 +102,13 @@ func (p *Packet) Encode() []byte {
 	data[14] = byte(p.Repeater)
 	bits := byte(0)
 	if p.Slot {
-		bits |= 0x1
+		bits |= 0x80 //nolint:golint,gomnd
 	}
 	if !p.GroupCall {
-		bits |= 0x2
+		bits |= 0x40 //nolint:golint,gomnd
 	}
-	bits |= byte((p.FrameType & 0x3) << 2)
-	bits |= byte((p.DTypeOrVSeq & 0xF) << 4)
+	bits |= byte((p.FrameType & 0x3) << 4) //nolint:golint,gomnd
+	bits |= byte(p.DTypeOrVSeq & 0xF)      //nolint:golint,gomnd
 	data[15] = bits
 	data[16] = byte(p.StreamID >> 24) //nolint:golint,gomnd
 	data[17] = byte(p.StreamID >> 16) //nolint:golint,gomnd

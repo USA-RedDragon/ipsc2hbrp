@@ -334,17 +334,21 @@ func TestEncodeBitFields(t *testing.T) {
 	data := p.Encode()
 	bits := data[15]
 
-	if bits&0x1 != 1 {
-		t.Fatalf("expected bit 0 set for Slot=true, got %08b", bits)
+	// Bit 7: Slot (0x80)
+	if bits&0x80 != 0x80 {
+		t.Fatalf("expected bit 7 set for Slot=true, got %08b", bits)
 	}
-	if bits&0x2 != 2 {
-		t.Fatalf("expected bit 1 set for GroupCall=false, got %08b", bits)
+	// Bit 6: Call type (0x40 = private)
+	if bits&0x40 != 0x40 {
+		t.Fatalf("expected bit 6 set for GroupCall=false, got %08b", bits)
 	}
-	if (bits&0xC)>>2 != 2 {
-		t.Fatalf("expected FrameType=2, got %d from bits %08b", (bits&0xC)>>2, bits)
+	// Bits 5-4: FrameType
+	if (bits&0x30)>>4 != 2 {
+		t.Fatalf("expected FrameType=2, got %d from bits %08b", (bits&0x30)>>4, bits)
 	}
-	if (bits&0xF0)>>4 != 5 {
-		t.Fatalf("expected DTypeOrVSeq=5, got %d from bits %08b", (bits&0xF0)>>4, bits)
+	// Bits 3-0: DTypeOrVSeq
+	if bits&0x0F != 5 {
+		t.Fatalf("expected DTypeOrVSeq=5, got %d from bits %08b", bits&0x0F, bits)
 	}
 }
 

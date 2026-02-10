@@ -66,6 +66,10 @@ type MMDVM struct {
 	PCRewrites   []PCRewriteConfig   `name:"pc-rewrite" description:"Private call rewrite rules"`
 	TypeRewrites []TypeRewriteConfig `name:"type-rewrite" description:"Type rewrite rules (group TG to private call)"`
 	SrcRewrites  []SrcRewriteConfig  `name:"src-rewrite" description:"Source rewrite rules (private call by source to group TG)"`
+
+	// PassAll rules allow all traffic of a given type on a slot without rewriting.
+	PassAllPC []int `name:"pass-all-pc" description:"Timeslots on which all private calls pass through unchanged (e.g. [1, 2])"`
+	PassAllTG []int `name:"pass-all-tg" description:"Timeslots on which all group calls pass through unchanged (e.g. [1, 2])"`
 }
 
 // TGRewriteConfig maps group TG calls from one slot/TG to another.
@@ -98,13 +102,12 @@ type TypeRewriteConfig struct {
 	Range    uint `name:"range" description:"Number of contiguous entries to map" default:"1"`
 }
 
-// SrcRewriteConfig matches private calls by source ID and rewrites them as group TG calls.
-// Modeled after DMRGateway's SrcRewrite: fromSlot, fromId, toSlot, toTG, range.
+// SrcRewriteConfig matches calls by source ID and remaps the source into a prefixed range.
 type SrcRewriteConfig struct {
 	FromSlot uint `name:"from-slot" description:"Source timeslot (1 or 2)"`
 	FromID   uint `name:"from-id" description:"Source ID start"`
 	ToSlot   uint `name:"to-slot" description:"Destination timeslot (1 or 2)"`
-	ToTG     uint `name:"to-tg" description:"Destination talkgroup"`
+	ToID     uint `name:"to-id" description:"Destination source ID start"`
 	Range    uint `name:"range" description:"Number of contiguous source IDs to match" default:"1"`
 }
 

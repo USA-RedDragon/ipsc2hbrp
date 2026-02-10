@@ -281,12 +281,12 @@ Rewrite rules control how DMR traffic is routed between the repeater and each ma
 | `mmdvm[].type-rewrite[].to-id`     | uint | -       | Destination private call ID start   |
 | `mmdvm[].type-rewrite[].range`     | uint | `1`     | Number of contiguous entries to map |
 
-#### SrcRewrite — match private calls by source, rewrite as group TG
+#### SrcRewrite — match calls by source, remap source ID
 
 |              Setting              | Type | Default |           Description           |
 | --------------------------------- | ---- | ------- | ------------------------------- |
 | `mmdvm[].src-rewrite[].from-slot` | uint | -       | Source timeslot (1 or 2)        |
 | `mmdvm[].src-rewrite[].from-id`   | uint | -       | Source subscriber ID start      |
 | `mmdvm[].src-rewrite[].to-slot`   | uint | -       | Destination timeslot (1 or 2)   |
-| `mmdvm[].src-rewrite[].to-tg`     | uint | -       | Destination talkgroup           |
+| `mmdvm[].src-rewrite[].to-id`     | uint | -       | Destination source ID start     |
 | `mmdvm[].src-rewrite[].range`     | uint | `1`     | Number of contiguous source IDs |

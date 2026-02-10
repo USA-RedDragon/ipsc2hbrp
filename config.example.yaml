@@ -64,12 +64,12 @@ mmdvm:
     #     to-slot: 1
     #     to-id: 3100
     #     range: 1
-    # SrcRewrite: match private calls by source ID, rewrite as group TG
+    # SrcRewrite: match calls by source ID, remap source into a prefixed range
     # src-rewrite:
     #   - from-slot: 1
     #     from-id: 1234
     #     to-slot: 1
-    #     to-tg: 9
+    #     to-id: 9
     #     range: 1
 
   # Additional DMR masters can be added:

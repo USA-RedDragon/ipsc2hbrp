@@ -9,9 +9,6 @@
 package rewrite
 
 import (
-	"fmt"
-	"log/slog"
-
 	"github.com/USA-RedDragon/ipsc2mmdvm/internal/mmdvm/proto"
 )
 
@@ -30,14 +27,14 @@ type Rule interface {
 	// Process inspects and potentially rewrites pkt. Returns Matched if the
 	// rule applied, Unmatched otherwise. When trace is true, debug logging
 	// is emitted.
-	Process(pkt *proto.Packet, trace bool) Result
+	Process(pkt *proto.Packet) Result
 }
 
 // Apply iterates over rules and returns true if any rule matched.
 // The first matching rule wins and the iteration stops.
-func Apply(rules []Rule, pkt *proto.Packet, trace bool) bool {
+func Apply(rules []Rule, pkt *proto.Packet) bool {
 	for _, r := range rules {
-		if r.Process(pkt, trace) == Matched {
+		if r.Process(pkt) == Matched {
 			return true
 		}
 	}
@@ -59,18 +56,10 @@ type TGRewrite struct {
 }
 
 func (r *TGRewrite) fromTGEnd() uint { return r.FromTG + r.Range - 1 }
-func (r *TGRewrite) toTGEnd() uint   { return r.ToTG + r.Range - 1 }
 
-func (r *TGRewrite) Process(pkt *proto.Packet, trace bool) Result {
+func (r *TGRewrite) Process(pkt *proto.Packet) Result {
 	slot := pktSlot(pkt)
 	if !pkt.GroupCall || slot != r.FromSlot || pkt.Dst < r.FromTG || pkt.Dst > r.fromTGEnd() {
-		if trace {
-			if r.FromTG == r.fromTGEnd() {
-				slog.Debug(fmt.Sprintf("Rule Trace, TGRewrite from %s Slot=%d Dst=TG%d: not matched", r.Name, r.FromSlot, r.FromTG))
-			} else {
-				slog.Debug(fmt.Sprintf("Rule Trace, TGRewrite from %s Slot=%d Dst=TG%d-TG%d: not matched", r.Name, r.FromSlot, r.FromTG, r.fromTGEnd()))
-			}
-		}
 		return Unmatched
 	}
 
@@ -80,19 +69,6 @@ func (r *TGRewrite) Process(pkt *proto.Packet, trace bool) Result {
 
 	if r.FromTG != r.ToTG {
 		pkt.Dst = pkt.Dst + r.ToTG - r.FromTG
-	}
-
-	if trace {
-		if r.FromTG == r.fromTGEnd() {
-			slog.Debug(fmt.Sprintf("Rule Trace, TGRewrite from %s Slot=%d Dst=TG%d: matched", r.Name, r.FromSlot, r.FromTG))
-		} else {
-			slog.Debug(fmt.Sprintf("Rule Trace, TGRewrite from %s Slot=%d Dst=TG%d-TG%d: matched", r.Name, r.FromSlot, r.FromTG, r.fromTGEnd()))
-		}
-		if r.ToTG == r.toTGEnd() {
-			slog.Debug(fmt.Sprintf("Rule Trace, TGRewrite to %s Slot=%d Dst=TG%d", r.Name, r.ToSlot, r.ToTG))
-		} else {
-			slog.Debug(fmt.Sprintf("Rule Trace, TGRewrite to %s Slot=%d Dst=TG%d-TG%d", r.Name, r.ToSlot, r.ToTG, r.toTGEnd()))
-		}
 	}
 
 	return Matched
@@ -113,14 +89,10 @@ type PCRewrite struct {
 }
 
 func (r *PCRewrite) fromIDEnd() uint { return r.FromID + r.Range - 1 }
-func (r *PCRewrite) toIDEnd() uint   { return r.ToID + r.Range - 1 }
 
-func (r *PCRewrite) Process(pkt *proto.Packet, trace bool) Result {
+func (r *PCRewrite) Process(pkt *proto.Packet) Result {
 	slot := pktSlot(pkt)
 	if pkt.GroupCall || slot != r.FromSlot || pkt.Dst < r.FromID || pkt.Dst > r.fromIDEnd() {
-		if trace {
-			slog.Debug(fmt.Sprintf("Rule Trace, PCRewrite from %s Slot=%d Dst=%d-%d: not matched", r.Name, r.FromSlot, r.FromID, r.fromIDEnd()))
-		}
 		return Unmatched
 	}
 
@@ -130,11 +102,6 @@ func (r *PCRewrite) Process(pkt *proto.Packet, trace bool) Result {
 
 	if r.FromID != r.ToID {
 		pkt.Dst = pkt.Dst + r.ToID - r.FromID
-	}
-
-	if trace {
-		slog.Debug(fmt.Sprintf("Rule Trace, PCRewrite from %s Slot=%d Dst=%d-%d: matched", r.Name, r.FromSlot, r.FromID, r.fromIDEnd()))
-		slog.Debug(fmt.Sprintf("Rule Trace, PCRewrite to %s Slot=%d Dst=%d-%d", r.Name, r.ToSlot, r.ToID, r.toIDEnd()))
 	}
 
 	return Matched
@@ -155,18 +122,10 @@ type TypeRewrite struct {
 }
 
 func (r *TypeRewrite) fromTGEnd() uint { return r.FromTG + r.Range - 1 }
-func (r *TypeRewrite) toIDEnd() uint   { return r.ToID + r.Range - 1 }
 
-func (r *TypeRewrite) Process(pkt *proto.Packet, trace bool) Result {
+func (r *TypeRewrite) Process(pkt *proto.Packet) Result {
 	slot := pktSlot(pkt)
 	if !pkt.GroupCall || slot != r.FromSlot || pkt.Dst < r.FromTG || pkt.Dst > r.fromTGEnd() {
-		if trace {
-			if r.FromTG == r.fromTGEnd() {
-				slog.Debug(fmt.Sprintf("Rule Trace, TypeRewrite from %s Slot=%d Dst=TG%d: not matched", r.Name, r.FromSlot, r.FromTG))
-			} else {
-				slog.Debug(fmt.Sprintf("Rule Trace, TypeRewrite from %s Slot=%d Dst=TG%d-TG%d: not matched", r.Name, r.FromSlot, r.FromTG, r.fromTGEnd()))
-			}
-		}
 		return Unmatched
 	}
 
@@ -181,44 +140,28 @@ func (r *TypeRewrite) Process(pkt *proto.Packet, trace bool) Result {
 	// Convert from Group to Private call
 	pkt.GroupCall = false
 
-	if trace {
-		if r.FromTG == r.fromTGEnd() {
-			slog.Debug(fmt.Sprintf("Rule Trace, TypeRewrite from %s Slot=%d Dst=TG%d: matched", r.Name, r.FromSlot, r.FromTG))
-		} else {
-			slog.Debug(fmt.Sprintf("Rule Trace, TypeRewrite from %s Slot=%d Dst=TG%d-TG%d: matched", r.Name, r.FromSlot, r.FromTG, r.fromTGEnd()))
-		}
-		if r.ToID == r.toIDEnd() {
-			slog.Debug(fmt.Sprintf("Rule Trace, TypeRewrite to %s Slot=%d Dst=%d", r.Name, r.ToSlot, r.ToID))
-		} else {
-			slog.Debug(fmt.Sprintf("Rule Trace, TypeRewrite to %s Slot=%d Dst=%d-%d", r.Name, r.ToSlot, r.ToID, r.toIDEnd()))
-		}
-	}
-
 	return Matched
 }
 
 // --- SrcRewrite --------------------------------------------------------------
-// Matches Private calls by source ID and rewrites them as Group TG calls.
-// Used for the network→RF direction in DMRGateway.
+// Matches calls by source ID and remaps the source into a prefixed range.
+// The destination and call type (group/private) are preserved.
 
-// SrcRewrite rewrites private calls (matched by source ID) into group calls.
+// SrcRewrite rewrites the source ID of matched calls.
 type SrcRewrite struct {
 	Name     string
 	FromSlot uint
 	FromID   uint // start of source ID range
 	ToSlot   uint
-	ToTG     uint // destination talkgroup
+	ToID     uint // start of destination source ID range
 	Range    uint
 }
 
 func (r *SrcRewrite) fromIDEnd() uint { return r.FromID + r.Range - 1 }
 
-func (r *SrcRewrite) Process(pkt *proto.Packet, trace bool) Result {
+func (r *SrcRewrite) Process(pkt *proto.Packet) Result {
 	slot := pktSlot(pkt)
-	if pkt.GroupCall || slot != r.FromSlot || pkt.Src < r.FromID || pkt.Src > r.fromIDEnd() {
-		if trace {
-			slog.Debug(fmt.Sprintf("Rule Trace, SrcRewrite from %s Slot=%d Src=%d-%d: not matched", r.Name, r.FromSlot, r.FromID, r.fromIDEnd()))
-		}
+	if slot != r.FromSlot || pkt.Src < r.FromID || pkt.Src > r.fromIDEnd() {
 		return Unmatched
 	}
 
@@ -226,15 +169,49 @@ func (r *SrcRewrite) Process(pkt *proto.Packet, trace bool) Result {
 		setPktSlot(pkt, r.ToSlot)
 	}
 
-	pkt.Dst = r.ToTG
-	pkt.GroupCall = true
-
-	if trace {
-		slog.Debug(fmt.Sprintf("Rule Trace, SrcRewrite from %s Slot=%d Src=%d-%d: matched", r.Name, r.FromSlot, r.FromID, r.fromIDEnd()))
-		slog.Debug(fmt.Sprintf("Rule Trace, SrcRewrite to %s Slot=%d Dst=TG%d", r.Name, r.ToSlot, r.ToTG))
-	}
+	pkt.Src = r.ToID + (pkt.Src - r.FromID)
 
 	return Matched
+}
+
+// --- PassAllTG ---------------------------------------------------------------
+// Matches any group call on a given slot without rewriting anything.
+// Used as a fallback rule after specific rewrites.
+
+// PassAllTG allows all group calls on a specific slot to pass through.
+type PassAllTG struct {
+	Name string
+	Slot uint // 1 or 2
+}
+
+func (r *PassAllTG) Process(pkt *proto.Packet) Result {
+	slot := pktSlot(pkt)
+	matched := pkt.GroupCall && slot == r.Slot
+
+	if matched {
+		return Matched
+	}
+	return Unmatched
+}
+
+// --- PassAllPC ---------------------------------------------------------------
+// Matches any private call on a given slot without rewriting anything.
+// Used as a fallback rule after specific rewrites.
+
+// PassAllPC allows all private calls on a specific slot to pass through.
+type PassAllPC struct {
+	Name string
+	Slot uint // 1 or 2
+}
+
+func (r *PassAllPC) Process(pkt *proto.Packet) Result {
+	slot := pktSlot(pkt)
+	matched := !pkt.GroupCall && slot == r.Slot
+
+	if matched {
+		return Matched
+	}
+	return Unmatched
 }
 
 // --- helpers -----------------------------------------------------------------

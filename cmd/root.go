@@ -71,13 +71,22 @@ func runRoot(cmd *cobra.Command, _ []string) error {
 
 	ipscServer := ipsc.NewIPSCServer(cfg)
 
-	// Wire IPSC bursts to all MMDVM clients.
 	ipscServer.SetBurstHandler(func(packetType byte, data []byte, addr *net.UDPAddr) {
 		for _, client := range mmdvmClients {
-			// Each client has its own copy of data and applies its own rewrite rules.
-			dataCopy := make([]byte, len(data))
-			copy(dataCopy, data)
-			client.HandleIPSCBurst(packetType, dataCopy, addr)
+			if client.MatchesRules(packetType, data, false) {
+				dataCopy := make([]byte, len(data))
+				copy(dataCopy, data)
+				client.HandleIPSCBurst(packetType, dataCopy, addr)
+				return
+			}
+		}
+		for _, client := range mmdvmClients {
+			if client.MatchesRules(packetType, data, true) {
+				dataCopy := make([]byte, len(data))
+				copy(dataCopy, data)
+				client.HandleIPSCBurst(packetType, dataCopy, addr)
+				return
+			}
 		}
 	})
 
